@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { client, timeEntry } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { formatCents } from "@/lib/money";
@@ -8,19 +8,26 @@ import { formatDate } from "@/lib/dates";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { startOfWeek, format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { DeleteEntryButton } from "./delete-entry-button";
+import { EntryRowActions } from "./entry-row-actions";
 
 export default async function TimePage() {
   const user = await requireUser();
-  const rows = await db
-    .select({
-      entry: timeEntry,
-      clientName: client.name,
-    })
-    .from(timeEntry)
-    .innerJoin(client, eq(client.id, timeEntry.clientId))
-    .where(eq(timeEntry.userId, user.id))
-    .orderBy(desc(timeEntry.date), desc(timeEntry.createdAt));
+  const [rows, clients] = await Promise.all([
+    db
+      .select({
+        entry: timeEntry,
+        clientName: client.name,
+      })
+      .from(timeEntry)
+      .innerJoin(client, eq(client.id, timeEntry.clientId))
+      .where(eq(timeEntry.userId, user.id))
+      .orderBy(desc(timeEntry.date), desc(timeEntry.createdAt)),
+    db
+      .select()
+      .from(client)
+      .where(and(eq(client.userId, user.id), eq(client.archived, false)))
+      .orderBy(client.name),
+  ]);
 
   // Group by ISO week
   const groups = new Map<
@@ -124,7 +131,10 @@ export default async function TimePage() {
                         </Badge>
                       )}
                       {!r.entry.invoiceId && (
-                        <DeleteEntryButton id={r.entry.id} />
+                        <EntryRowActions
+                          entry={r.entry}
+                          clients={clients}
+                        />
                       )}
                     </div>
                   );

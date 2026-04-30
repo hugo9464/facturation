@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/actions/auth";
-import { LogTimeDialog } from "@/components/log-time-dialog";
+import { TimeEntryDialog } from "@/components/time-entry-dialog";
 import type { Client } from "@/db/schema";
 
 const NAV = [
@@ -102,13 +102,13 @@ export function AppShell({
         <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-2 border-b bg-background/95 backdrop-blur px-4 md:px-6">
           <div className="md:hidden text-base font-semibold">Facturation</div>
           <div className="flex-1" />
-          <LogTimeDialog clients={clients}>
+          <TimeEntryDialog clients={clients}>
             <Button size="sm" className="gap-1.5">
               <Plus className="size-4" />
               <span className="hidden sm:inline">Logger temps</span>
               <span className="sm:hidden">Temps</span>
             </Button>
-          </LogTimeDialog>
+          </TimeEntryDialog>
         </header>
         <main className="flex-1 px-4 md:px-6 py-6 pb-20 md:pb-6">
           {children}

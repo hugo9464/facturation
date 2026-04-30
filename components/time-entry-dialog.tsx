@@ -23,9 +23,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createTimeEntryAction } from "@/actions/time-entries";
+import {
+  createTimeEntryAction,
+  updateTimeEntryAction,
+} from "@/actions/time-entries";
 import { todayISO } from "@/lib/dates";
-import type { Client, RateType } from "@/db/schema";
+import type { Client, RateType, TimeEntry } from "@/db/schema";
 
 const TYPE_LABELS: Record<RateType, string> = {
   DAY: "Jour",
@@ -41,46 +44,77 @@ const DEFAULT_QTY: Record<RateType, string> = {
   FORFAIT: "1",
 };
 
-export function LogTimeDialog({
+export function TimeEntryDialog({
   children,
   clients,
+  entry,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   clients: Client[];
+  entry?: TimeEntry;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const [pending, startTransition] = useTransition();
-  const [clientId, setClientId] = useState<string>(clients[0]?.id ?? "");
-  const [type, setType] = useState<RateType>(
-    clients[0]?.defaultRateType ?? "DAY",
+
+  const isEdit = Boolean(entry);
+  const initialClientId = entry?.clientId ?? clients[0]?.id ?? "";
+  const initialType = entry?.type ?? clients[0]?.defaultRateType ?? "DAY";
+  const initialQuantity = entry
+    ? entry.quantity
+    : DEFAULT_QTY[initialType];
+  const initialRateCents = entry?.rateCents ?? clients[0]?.defaultRateCents ?? 0;
+
+  const [clientId, setClientId] = useState(initialClientId);
+  const [type, setType] = useState<RateType>(initialType);
+  const [quantity, setQuantity] = useState(initialQuantity);
+  const [rateCentsOverride, setRateCentsOverride] = useState<number | null>(
+    isEdit ? initialRateCents : null,
   );
-  const [quantity, setQuantity] = useState(DEFAULT_QTY[type]);
+
+  // Reset fields when entry changes (re-opens with different entry)
+  React.useEffect(() => {
+    if (entry) {
+      setClientId(entry.clientId);
+      setType(entry.type);
+      setQuantity(entry.quantity);
+      setRateCentsOverride(entry.rateCents);
+    }
+  }, [entry]);
 
   const selectedClient = clients.find((c) => c.id === clientId);
-  const rateCents = selectedClient?.defaultRateCents ?? 0;
+  const rateCents =
+    rateCentsOverride ?? selectedClient?.defaultRateCents ?? 0;
 
   function onClientChange(id: string | null) {
     if (!id) return;
     setClientId(id);
     const c = clients.find((c) => c.id === id);
-    if (c) {
+    if (c && !isEdit) {
       setType(c.defaultRateType);
       setQuantity(DEFAULT_QTY[c.defaultRateType]);
+      setRateCentsOverride(null);
     }
   }
 
   function onTypeChange(t: string | null) {
     if (!t) return;
     setType(t as RateType);
-    setQuantity(DEFAULT_QTY[t as RateType]);
+    if (!isEdit) setQuantity(DEFAULT_QTY[t as RateType]);
   }
 
-  const trigger = children as React.ReactElement;
+  const trigger =
+    children !== undefined ? (children as React.ReactElement) : null;
 
   if (clients.length === 0) {
     return (
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger render={trigger} />
+        {trigger && <DialogTrigger render={trigger} />}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Aucun client</DialogTitle>
@@ -100,23 +134,29 @@ export function LogTimeDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={trigger} />
+      {trigger && <DialogTrigger render={trigger} />}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Logger du temps</DialogTitle>
+          <DialogTitle>
+            {isEdit ? "Modifier la saisie" : "Logger du temps"}
+          </DialogTitle>
           <DialogDescription>
-            Saisie rapide d&apos;une prestation.
+            {isEdit
+              ? "Tu peux changer la date, la quantité, le type ou le tarif."
+              : "Saisie rapide d'une prestation."}
           </DialogDescription>
         </DialogHeader>
         <form
           className="space-y-4"
           action={(formData) => {
             startTransition(async () => {
-              const result = await createTimeEntryAction(formData);
+              const result = isEdit
+                ? await updateTimeEntryAction(entry!.id, formData)
+                : await createTimeEntryAction(formData);
               if (result?.error) {
                 toast.error(result.error);
               } else {
-                toast.success("Saisie enregistrée");
+                toast.success(isEdit ? "Saisie modifiée" : "Saisie enregistrée");
                 setOpen(false);
               }
             });
@@ -124,7 +164,7 @@ export function LogTimeDialog({
         >
           <div className="space-y-2">
             <Label htmlFor="client_id">Client</Label>
-            <Select value={clientId} onValueChange={onClientChange} name="client_id">
+            <Select value={clientId} onValueChange={onClientChange}>
               <SelectTrigger id="client_id" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -146,16 +186,13 @@ export function LogTimeDialog({
                 id="date"
                 name="date"
                 type="date"
-                defaultValue={todayISO()}
+                defaultValue={entry?.date ?? todayISO()}
                 required
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="type">Type</Label>
-              <Select
-                value={type}
-                onValueChange={(v) => onTypeChange(v as RateType)}
-              >
+              <Select value={type} onValueChange={onTypeChange}>
                 <SelectTrigger id="type" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -186,19 +223,21 @@ export function LogTimeDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rate">Tarif (€)</Label>
+              <Label htmlFor="rate">Tarif unitaire (€)</Label>
               <Input
                 id="rate"
-                name="rate_cents"
-                type="hidden"
-                value={rateCents}
-                readOnly
-              />
-              <Input
+                type="number"
+                step="0.01"
+                min="0"
                 value={(rateCents / 100).toFixed(2)}
-                disabled
-                className="text-muted-foreground"
+                onChange={(e) => {
+                  const cents = Math.round(
+                    Number(e.target.value.replace(",", ".")) * 100,
+                  );
+                  setRateCentsOverride(cents);
+                }}
               />
+              <input type="hidden" name="rate_cents" value={rateCents} />
             </div>
           </div>
 
@@ -208,13 +247,18 @@ export function LogTimeDialog({
               id="description"
               name="description"
               rows={2}
+              defaultValue={entry?.description ?? ""}
               placeholder="Ex: Refonte de la page d'accueil"
             />
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "Enregistrement…" : "Enregistrer"}
+              {pending
+                ? "Enregistrement…"
+                : isEdit
+                  ? "Enregistrer"
+                  : "Logger"}
             </Button>
           </DialogFooter>
         </form>

@@ -23,7 +23,6 @@ export async function createTimeEntryAction(formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
-  // Verify client ownership
   const [c] = await db
     .select({ id: client.id })
     .from(client)
@@ -40,6 +39,47 @@ export async function createTimeEntryAction(formData: FormData) {
     rateCents: data.rate_cents,
     description: data.description?.trim() || null,
   });
+  revalidatePath("/", "layout");
+  return { success: true };
+}
+
+export async function updateTimeEntryAction(id: string, formData: FormData) {
+  const user = await requireUser();
+  const parsed = createSchema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+  const data = parsed.data;
+
+  const [existing] = await db
+    .select({ id: timeEntry.id, invoiceId: timeEntry.invoiceId })
+    .from(timeEntry)
+    .where(and(eq(timeEntry.id, id), eq(timeEntry.userId, user.id)))
+    .limit(1);
+  if (!existing) return { error: "Saisie introuvable" };
+  if (existing.invoiceId) {
+    return { error: "Saisie déjà facturée — modification impossible." };
+  }
+
+  const [c] = await db
+    .select({ id: client.id })
+    .from(client)
+    .where(and(eq(client.id, data.client_id), eq(client.userId, user.id)))
+    .limit(1);
+  if (!c) return { error: "Client introuvable" };
+
+  await db
+    .update(timeEntry)
+    .set({
+      clientId: data.client_id,
+      date: data.date,
+      type: data.type,
+      quantity: data.quantity.toString(),
+      rateCents: data.rate_cents,
+      description: data.description?.trim() || null,
+      updatedAt: new Date(),
+    })
+    .where(eq(timeEntry.id, id));
   revalidatePath("/", "layout");
   return { success: true };
 }

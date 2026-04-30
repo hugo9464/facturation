@@ -23,6 +23,7 @@ import { formatDate } from "@/lib/dates";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { InvoiceActions } from "./invoice-actions";
 import { DraftLineEditor } from "./draft-line-editor";
+import { DraftDetailsEditor } from "./draft-details-editor";
 import { ArrowLeft } from "lucide-react";
 
 const STATUS_LABELS = {
@@ -149,7 +150,8 @@ export default async function InvoiceDetailPage({
             </Table>
           </div>
           {isDraft && <DraftLineEditor.AddForm invoiceId={id} />}
-          {inv.notes && (
+          {isDraft && <DraftDetailsEditor invoice={inv} />}
+          {!isDraft && inv.notes && (
             <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm italic">
               {inv.notes}
             </div>
