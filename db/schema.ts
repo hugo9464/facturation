@@ -30,6 +30,14 @@ export const invoiceStatusEnum = pgEnum("invoice_status", [
 
 export const plafondTypeEnum = pgEnum("plafond_type", ["BNC", "BIC"]);
 
+export const quoteStatusEnum = pgEnum("quote_status", [
+  "DRAFT",
+  "SENT",
+  "ACCEPTED",
+  "REJECTED",
+  "EXPIRED",
+]);
+
 export const profile = pgTable("profile", {
   userId: uuid("user_id").primaryKey(),
   businessName: text("business_name").notNull(),
@@ -165,6 +173,62 @@ export const timeEntry = pgTable(
   ],
 );
 
+export const quote = pgTable(
+  "quote",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => client.id, { onDelete: "restrict" }),
+    number: text("number"),
+    issueDate: date("issue_date").notNull(),
+    validUntil: date("valid_until").notNull(),
+    status: quoteStatusEnum("status").notNull().default("DRAFT"),
+    subtotalCents: integer("subtotal_cents").notNull().default(0),
+    totalCents: integer("total_cents").notNull().default(0),
+    currency: text("currency").notNull().default("EUR"),
+    legalMention: text("legal_mention").notNull(),
+    paymentTermsText: text("payment_terms_text").notNull(),
+    notes: text("notes"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+    convertedInvoiceId: uuid("converted_invoice_id").references(
+      () => invoice.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("quote_user_number_idx").on(t.userId, t.number),
+    index("quote_user_status_idx").on(t.userId, t.status),
+    index("quote_client_idx").on(t.clientId),
+  ],
+);
+
+export const quoteLine = pgTable(
+  "quote_line",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    quoteId: uuid("quote_id")
+      .notNull()
+      .references(() => quote.id, { onDelete: "cascade" }),
+    order: integer("order").notNull().default(0),
+    description: text("description").notNull(),
+    quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
+    unitType: rateTypeEnum("unit_type").notNull(),
+    unitPriceCents: integer("unit_price_cents").notNull(),
+    totalCents: integer("total_cents").notNull(),
+  },
+  (t) => [index("quote_line_quote_idx").on(t.quoteId)],
+);
+
 export const profileRelations = relations(profile, ({ many }) => ({
   clients: many(client),
   invoices: many(invoice),
@@ -174,6 +238,26 @@ export const profileRelations = relations(profile, ({ many }) => ({
 export const clientRelations = relations(client, ({ many }) => ({
   timeEntries: many(timeEntry),
   invoices: many(invoice),
+  quotes: many(quote),
+}));
+
+export const quoteRelations = relations(quote, ({ one, many }) => ({
+  client: one(client, {
+    fields: [quote.clientId],
+    references: [client.id],
+  }),
+  lines: many(quoteLine),
+  convertedInvoice: one(invoice, {
+    fields: [quote.convertedInvoiceId],
+    references: [invoice.id],
+  }),
+}));
+
+export const quoteLineRelations = relations(quoteLine, ({ one }) => ({
+  quote: one(quote, {
+    fields: [quoteLine.quoteId],
+    references: [quote.id],
+  }),
 }));
 
 export const invoiceRelations = relations(invoice, ({ one, many }) => ({
@@ -213,6 +297,11 @@ export type InvoiceLine = typeof invoiceLine.$inferSelect;
 export type NewInvoiceLine = typeof invoiceLine.$inferInsert;
 export type TimeEntry = typeof timeEntry.$inferSelect;
 export type NewTimeEntry = typeof timeEntry.$inferInsert;
+export type Quote = typeof quote.$inferSelect;
+export type NewQuote = typeof quote.$inferInsert;
+export type QuoteLine = typeof quoteLine.$inferSelect;
+export type NewQuoteLine = typeof quoteLine.$inferInsert;
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
+export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];

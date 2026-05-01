@@ -7,6 +7,7 @@ import {
   Clock,
   Users,
   FileText,
+  FileSignature,
   Settings,
   LogOut,
   Plus,
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/time", label: "Temps", icon: Clock },
   { href: "/clients", label: "Clients", icon: Users },
+  { href: "/quotes", label: "Devis", icon: FileSignature },
   { href: "/invoices", label: "Factures", icon: FileText },
 ] as const;
 
@@ -116,7 +118,7 @@ export function AppShell({
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-20 grid grid-cols-4 border-t bg-background/95 backdrop-blur">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-20 grid grid-cols-5 border-t bg-background/95 backdrop-blur">
         {NAV.map((item) => {
           const Icon = item.icon;
           const active = isActive(pathname, item.href);

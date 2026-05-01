@@ -1,0 +1,155 @@
+"use client";
+
+import { useState, useTransition, useMemo } from "react";
+import { toast } from "sonner";
+import { AlertCircle } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { createDraftQuoteAction } from "@/actions/quotes";
+import {
+  getClientMissingFields,
+  type MissingField,
+} from "@/lib/billing-readiness";
+import type { Client } from "@/db/schema";
+
+export function NewQuotePicker({
+  clients,
+  profileMissing,
+}: {
+  clients: Client[];
+  profileMissing: MissingField[];
+}) {
+  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  const [pending, start] = useTransition();
+
+  const selectedClient = clients.find((c) => c.id === clientId);
+  const clientMissing = useMemo(
+    () => (selectedClient ? getClientMissingFields(selectedClient) : []),
+    [selectedClient],
+  );
+  const billable =
+    profileMissing.length === 0 && clientMissing.length === 0;
+
+  if (clients.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Aucun client</CardTitle>
+          <CardDescription>
+            Crée d&apos;abord un client pour pouvoir faire un devis.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ButtonLink href="/clients/new">Créer un client</ButtonLink>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function onSubmit() {
+    if (!clientId) return;
+    start(async () => {
+      const r = await createDraftQuoteAction({ clientId });
+      if (r?.error) toast.error(r.error);
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      {(profileMissing.length > 0 || clientMissing.length > 0) && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 space-y-3">
+          <div className="flex items-start gap-2 text-destructive">
+            <AlertCircle className="size-4 mt-0.5 shrink-0" />
+            <p className="text-sm font-medium">
+              Informations manquantes pour ce devis
+            </p>
+          </div>
+          {profileMissing.length > 0 && (
+            <div className="text-sm pl-6">
+              <p className="font-medium">Tes paramètres :</p>
+              <ul className="list-disc pl-5 text-muted-foreground mt-1">
+                {profileMissing.map((m) => (
+                  <li key={m.field}>{m.label}</li>
+                ))}
+              </ul>
+              <ButtonLink
+                href="/settings"
+                size="sm"
+                variant="outline"
+                className="mt-2"
+              >
+                Compléter les paramètres
+              </ButtonLink>
+            </div>
+          )}
+          {clientMissing.length > 0 && selectedClient && (
+            <div className="text-sm pl-6">
+              <p className="font-medium">Client {selectedClient.name} :</p>
+              <ul className="list-disc pl-5 text-muted-foreground mt-1">
+                {clientMissing.map((m) => (
+                  <li key={m.field}>{m.label}</li>
+                ))}
+              </ul>
+              <ButtonLink
+                href={`/clients/${selectedClient.id}`}
+                size="sm"
+                variant="outline"
+                className="mt-2"
+              >
+                Compléter le client
+              </ButtonLink>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Client</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="client">Sélectionne le client</Label>
+            <Select
+              value={clientId}
+              onValueChange={(v) => v && setClientId(v)}
+            >
+              <SelectTrigger id="client" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Button
+        onClick={onSubmit}
+        disabled={pending || !billable || !clientId}
+        size="lg"
+      >
+        {pending ? "Création…" : "Créer le brouillon"}
+      </Button>
+    </div>
+  );
+}

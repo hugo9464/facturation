@@ -26,6 +26,20 @@ export function buildPaymentTermsText(profile: Profile): string {
   return `Règlement à ${days} jours par virement bancaire.`;
 }
 
+export const QUOTE_ACCEPTANCE_MENTION =
+  "Bon pour accord — date et signature précédées de la mention « Bon pour accord ».";
+
+export function buildQuoteLegalMention(profile: Profile): string {
+  const parts = [
+    TVA_FRANCHISE_MENTION,
+    "Devis gratuit valable jusqu'à la date indiquée ci-dessus.",
+    "Le présent devis devient un contrat dès retour signé par le client.",
+  ];
+  if (profile.rcsExempt) parts.push(RCS_EXEMPTION_MENTION);
+  if (profile.legalMentionExtra?.trim()) parts.push(profile.legalMentionExtra.trim());
+  return parts.join("\n");
+}
+
 export const PLAFOND_LIMITS = {
   BNC: 77_700_00,
   BIC: 188_700_00,
