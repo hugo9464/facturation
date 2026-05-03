@@ -69,7 +69,9 @@ export function TimeEntryDialog({
     ? entry.quantity
     : DEFAULT_QTY[initialType];
   const initialRateCents = entry?.rateCents ?? clients[0]?.defaultRateCents ?? 0;
+  const entryKey = entry?.id ?? "new";
 
+  const [loadedEntryKey, setLoadedEntryKey] = useState(entryKey);
   const [clientId, setClientId] = useState(initialClientId);
   const [type, setType] = useState<RateType>(initialType);
   const [quantity, setQuantity] = useState(initialQuantity);
@@ -77,15 +79,13 @@ export function TimeEntryDialog({
     isEdit ? initialRateCents : null,
   );
 
-  // Reset fields when entry changes (re-opens with different entry)
-  React.useEffect(() => {
-    if (entry) {
-      setClientId(entry.clientId);
-      setType(entry.type);
-      setQuantity(entry.quantity);
-      setRateCentsOverride(entry.rateCents);
-    }
-  }, [entry]);
+  if (loadedEntryKey !== entryKey) {
+    setLoadedEntryKey(entryKey);
+    setClientId(initialClientId);
+    setType(initialType);
+    setQuantity(initialQuantity);
+    setRateCentsOverride(isEdit ? initialRateCents : null);
+  }
 
   const selectedClient = clients.find((c) => c.id === clientId);
   const rateCents =

@@ -116,13 +116,13 @@ export default async function QuoteDetailPage({
       </div>
 
       {convertedInvoice && (
-        <div className="rounded-md border bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-sm">
-          <p className="font-medium text-emerald-900 dark:text-emerald-200">
+        <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm">
+          <p className="font-medium text-emerald-200">
             Devis converti en facture {convertedInvoice.number ?? "brouillon"}
           </p>
           <Link
             href={`/invoices/${convertedInvoice.id}`}
-            className="text-emerald-700 dark:text-emerald-300 underline underline-offset-2"
+            className="text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
           >
             Voir la facture →
           </Link>
@@ -190,7 +190,7 @@ export default async function QuoteDetailPage({
           {editable && <QuoteLineEditor.AddForm quoteId={id} />}
           {editable && <QuoteDetailsEditor quote={q} />}
           {!editable && q.notes && (
-            <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm italic">
+            <div className="rounded-md border bg-muted/35 px-4 py-3 text-sm italic">
               {q.notes}
             </div>
           )}

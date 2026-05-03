@@ -13,7 +13,6 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
-import { groupEntriesIntoLines } from "@/lib/invoice-grouping";
 import { buildLegalMention, buildPaymentTermsText } from "@/lib/legal";
 import {
   formatMissingFieldsError,
@@ -26,23 +25,44 @@ import { eurosToCents } from "@/lib/money";
 import { renderInvoicePDFToBuffer } from "@/lib/pdf-render";
 import { createClient as createSupabase } from "@/lib/supabase/server";
 
-const draftSchema = z.object({
-  client_id: z.string().uuid(),
-  entry_ids: z.array(z.string().uuid()).min(1, "Sélectionne au moins une saisie"),
+const draftLineSchema = z.object({
+  description: z.string().trim().min(1, "La description est obligatoire"),
+  quantity: z.coerce.number().positive("La quantité doit être positive"),
+  unitType: z.enum(["DAY", "HALF_DAY", "HOUR", "FORFAIT"]),
+  unitPriceCents: z.coerce.number().int().nonnegative(),
+  timeEntryIds: z.array(z.string().uuid()).default([]),
 });
+
+const draftSchema = z
+  .object({
+    clientId: z.string().uuid(),
+    periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    lines: z.array(draftLineSchema).min(1, "Ajoute au moins une ligne"),
+  })
+  .refine((data) => data.periodEnd >= data.periodStart, {
+    message: "La date de fin doit être après la date de début",
+    path: ["periodEnd"],
+  });
 
 export async function createDraftInvoiceAction(input: {
   clientId: string;
-  entryIds: string[];
+  periodStart: string;
+  periodEnd: string;
+  lines: Array<{
+    description: string;
+    quantity: number;
+    unitType: "DAY" | "HALF_DAY" | "HOUR" | "FORFAIT";
+    unitPriceCents: number;
+    timeEntryIds: string[];
+  }>;
 }) {
   const user = await requireUser();
-  const parsed = draftSchema.safeParse({
-    client_id: input.clientId,
-    entry_ids: input.entryIds,
-  });
+  const parsed = draftSchema.safeParse(input);
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
+  const data = parsed.data;
 
   const [profileRow] = await db
     .select()
@@ -54,7 +74,7 @@ export async function createDraftInvoiceAction(input: {
     .select()
     .from(clientTable)
     .where(
-      and(eq(clientTable.id, input.clientId), eq(clientTable.userId, user.id)),
+      and(eq(clientTable.id, data.clientId), eq(clientTable.userId, user.id)),
     )
     .limit(1);
   if (!c) return { error: "Client introuvable" };
@@ -74,50 +94,78 @@ export async function createDraftInvoiceAction(input: {
     return { error: "Paramètres d'entreprise manquants." };
   }
 
-  const entries = await db
-    .select()
-    .from(timeEntry)
-    .where(
-      and(
-        inArray(timeEntry.id, input.entryIds),
-        eq(timeEntry.userId, user.id),
-        eq(timeEntry.clientId, input.clientId),
-      ),
+  const allRequestedTimeEntryIds = data.lines.flatMap((line) => line.timeEntryIds);
+  const requestedTimeEntryIds = Array.from(new Set(allRequestedTimeEntryIds));
+  if (requestedTimeEntryIds.length !== allRequestedTimeEntryIds.length) {
+    return { error: "Une saisie ne peut être facturée qu'une seule fois." };
+  }
+  if (requestedTimeEntryIds.length > 0) {
+    const entries = await db
+      .select()
+      .from(timeEntry)
+      .where(
+        and(
+          inArray(timeEntry.id, requestedTimeEntryIds),
+          eq(timeEntry.userId, user.id),
+          eq(timeEntry.clientId, data.clientId),
+        ),
+      );
+    const validEntryIds = new Set(
+      entries
+        .filter(
+          (entry) =>
+            !entry.invoiceId &&
+            entry.date >= data.periodStart &&
+            entry.date <= data.periodEnd,
+        )
+        .map((entry) => entry.id),
     );
-
-  const billable = entries.filter((e) => !e.invoiceId);
-  if (billable.length === 0) {
-    return { error: "Aucune saisie facturable dans la sélection." };
+    if (validEntryIds.size !== requestedTimeEntryIds.length) {
+      return {
+        error:
+          "Certaines saisies ne sont plus facturables pour cette période.",
+      };
+    }
   }
 
-  const lines = groupEntriesIntoLines(billable);
+  const lines = data.lines.map((line) => {
+    const totalCents = Math.round(line.quantity * line.unitPriceCents);
+    return {
+      description: line.description.trim(),
+      quantity: line.quantity,
+      unitType: line.unitType,
+      unitPriceCents: line.unitPriceCents,
+      totalCents,
+      timeEntryIds: Array.from(new Set(line.timeEntryIds)),
+    };
+  });
   const subtotalCents = lines.reduce((acc, l) => acc + l.totalCents, 0);
 
   const issueDate = todayISO();
   const dueDate = addDaysISO(issueDate, profileRow.defaultPaymentTermsDays);
 
-  const [inv] = await db
-    .insert(invoice)
-    .values({
-      userId: user.id,
-      clientId: c.id,
-      number: null,
-      issueDate,
-      dueDate,
-      status: "DRAFT",
-      subtotalCents,
-      totalCents: subtotalCents,
-      currency: "EUR",
-      legalMention: buildLegalMention(profileRow),
-      paymentTermsText: buildPaymentTermsText(profileRow),
-      notes: null,
-    })
-    .returning({ id: invoice.id });
+  const inv = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(invoice)
+      .values({
+        userId: user.id,
+        clientId: c.id,
+        number: null,
+        issueDate,
+        dueDate,
+        status: "DRAFT",
+        subtotalCents,
+        totalCents: subtotalCents,
+        currency: "EUR",
+        legalMention: buildLegalMention(profileRow),
+        paymentTermsText: buildPaymentTermsText(profileRow),
+        notes: null,
+      })
+      .returning({ id: invoice.id });
 
-  if (lines.length > 0) {
-    await db.insert(invoiceLine).values(
+    await tx.insert(invoiceLine).values(
       lines.map((l, i) => ({
-        invoiceId: inv.id,
+        invoiceId: created.id,
         order: i,
         description: l.description,
         quantity: l.quantity.toString(),
@@ -127,7 +175,9 @@ export async function createDraftInvoiceAction(input: {
         timeEntryIds: l.timeEntryIds,
       })),
     );
-  }
+
+    return created;
+  });
 
   revalidatePath("/invoices");
   redirect(`/invoices/${inv.id}`);

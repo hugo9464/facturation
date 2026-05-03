@@ -14,7 +14,7 @@ export default async function OnboardingPage() {
     .limit(1);
   if (row) redirect("/");
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-muted/30">
+    <div className="min-h-screen flex items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-2xl space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Bienvenue</h1>

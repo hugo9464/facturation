@@ -38,6 +38,15 @@ export const quoteStatusEnum = pgEnum("quote_status", [
   "EXPIRED",
 ]);
 
+export const todoStatusEnum = pgEnum("todo_status", [
+  "BACKLOG",
+  "TODO",
+  "IN_PROGRESS",
+  "TO_TEST",
+  "DONE",
+  "CANCELLED",
+]);
+
 export const profile = pgTable("profile", {
   userId: uuid("user_id").primaryKey(),
   businessName: text("business_name").notNull(),
@@ -53,6 +62,7 @@ export const profile = pgTable("profile", {
   plafondType: plafondTypeEnum("plafond_type").notNull().default("BNC"),
   nextInvoiceNumber: integer("next_invoice_number").notNull().default(1),
   nextQuoteNumber: integer("next_quote_number").notNull().default(1),
+  nextTaskNumber: integer("next_task_number").notNull().default(1),
   legalMentionExtra: text("legal_mention_extra"),
   rcsExempt: boolean("rcs_exempt").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -229,10 +239,67 @@ export const quoteLine = pgTable(
   (t) => [index("quote_line_quote_idx").on(t.quoteId)],
 );
 
+export const todoProject = pgTable(
+  "todo_project",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profile.userId, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    order: integer("order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("todo_project_user_order_idx").on(t.userId, t.order),
+    uniqueIndex("todo_project_user_name_idx").on(t.userId, t.name),
+  ],
+);
+
+export const todoTask = pgTable(
+  "todo_task",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profile.userId, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => todoProject.id, { onDelete: "restrict" }),
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: todoStatusEnum("status").notNull().default("TODO"),
+    order: integer("order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("todo_task_user_number_idx").on(t.userId, t.number),
+    index("todo_task_project_status_order_idx").on(
+      t.projectId,
+      t.status,
+      t.order,
+    ),
+    index("todo_task_user_status_order_idx").on(t.userId, t.status, t.order),
+  ],
+);
+
 export const profileRelations = relations(profile, ({ many }) => ({
   clients: many(client),
   invoices: many(invoice),
   timeEntries: many(timeEntry),
+  todoTasks: many(todoTask),
+  todoProjects: many(todoProject),
 }));
 
 export const clientRelations = relations(client, ({ many }) => ({
@@ -287,6 +354,25 @@ export const timeEntryRelations = relations(timeEntry, ({ one }) => ({
   }),
 }));
 
+export const todoTaskRelations = relations(todoTask, ({ one }) => ({
+  profile: one(profile, {
+    fields: [todoTask.userId],
+    references: [profile.userId],
+  }),
+  project: one(todoProject, {
+    fields: [todoTask.projectId],
+    references: [todoProject.id],
+  }),
+}));
+
+export const todoProjectRelations = relations(todoProject, ({ one, many }) => ({
+  profile: one(profile, {
+    fields: [todoProject.userId],
+    references: [profile.userId],
+  }),
+  tasks: many(todoTask),
+}));
+
 export type Profile = typeof profile.$inferSelect;
 export type NewProfile = typeof profile.$inferInsert;
 export type Client = typeof client.$inferSelect;
@@ -301,7 +387,12 @@ export type Quote = typeof quote.$inferSelect;
 export type NewQuote = typeof quote.$inferInsert;
 export type QuoteLine = typeof quoteLine.$inferSelect;
 export type NewQuoteLine = typeof quoteLine.$inferInsert;
+export type TodoTask = typeof todoTask.$inferSelect;
+export type NewTodoTask = typeof todoTask.$inferInsert;
+export type TodoProject = typeof todoProject.$inferSelect;
+export type NewTodoProject = typeof todoProject.$inferInsert;
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
+export type TodoStatus = (typeof todoStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
