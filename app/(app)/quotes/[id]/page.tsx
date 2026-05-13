@@ -1,13 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/db";
-import {
-  client as clientTable,
-  invoice,
-  quote,
-  quoteLine,
-} from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +15,18 @@ import { formatCents } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { QuoteActions } from "./quote-actions";
-import { QuoteLineEditor } from "./quote-line-editor";
+import {
+  AddQuoteLineForm,
+  DeleteQuoteLineButton,
+} from "./quote-line-editor";
 import { QuoteDetailsEditor } from "./quote-details-editor";
 import { ArrowLeft } from "lucide-react";
+import {
+  getSupabaseDb,
+  toClient,
+  toQuote,
+  toQuoteLine,
+} from "@/lib/supabase/db";
 
 const STATUS_LABELS = {
   DRAFT: "Brouillon",
@@ -50,39 +51,46 @@ export default async function QuoteDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
+  const supabase = await getSupabaseDb();
 
-  const [q] = await db
-    .select()
-    .from(quote)
-    .where(and(eq(quote.id, id), eq(quote.userId, user.id)))
-    .limit(1);
+  const { data: quoteRow, error: quoteError } = await supabase
+    .from("quote")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (quoteError) throw quoteError;
+  const q = quoteRow ? toQuote(quoteRow) : null;
   if (!q) notFound();
 
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(eq(clientTable.id, q.clientId))
-    .limit(1);
+  const [clientResult, linesResult, invoiceResult] = await Promise.all([
+    supabase
+      .from("client")
+      .select("*")
+      .eq("id", q.clientId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("quote_line")
+      .select("*")
+      .eq("quote_id", id)
+      .order("order", { ascending: true }),
+    q.convertedInvoiceId
+      ? supabase
+          .from("invoice")
+          .select("id, number, status")
+          .eq("id", q.convertedInvoiceId)
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  if (clientResult.error) throw clientResult.error;
+  if (linesResult.error) throw linesResult.error;
+  if (invoiceResult.error) throw invoiceResult.error;
 
-  const lines = await db
-    .select()
-    .from(quoteLine)
-    .where(eq(quoteLine.quoteId, id))
-    .orderBy(quoteLine.order);
-
-  const convertedInvoice = q.convertedInvoiceId
-    ? (
-        await db
-          .select({
-            id: invoice.id,
-            number: invoice.number,
-            status: invoice.status,
-          })
-          .from(invoice)
-          .where(eq(invoice.id, q.convertedInvoiceId))
-          .limit(1)
-      )[0]
-    : null;
+  const c = clientResult.data ? toClient(clientResult.data) : null;
+  const lines = (linesResult.data ?? []).map(toQuoteLine);
+  const convertedInvoice = invoiceResult.data;
 
   const editable = q.status === "DRAFT" || q.status === "SENT";
 
@@ -167,7 +175,7 @@ export default async function QuoteDetailPage({
                     </TableCell>
                     {editable && (
                       <TableCell className="text-right">
-                        <QuoteLineEditor.DeleteButton
+                        <DeleteQuoteLineButton
                           quoteId={id}
                           lineId={l.id}
                         />
@@ -187,7 +195,7 @@ export default async function QuoteDetailPage({
               </TableBody>
             </Table>
           </div>
-          {editable && <QuoteLineEditor.AddForm quoteId={id} />}
+          {editable && <AddQuoteLineForm quoteId={id} />}
           {editable && <QuoteDetailsEditor quote={q} />}
           {!editable && q.notes && (
             <div className="rounded-md border bg-muted/35 px-4 py-3 text-sm italic">

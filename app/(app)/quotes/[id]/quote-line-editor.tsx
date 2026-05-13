@@ -18,7 +18,7 @@ import {
   deleteQuoteLineAction,
 } from "@/actions/quotes";
 
-function AddForm({ quoteId }: { quoteId: string }) {
+export function AddQuoteLineForm({ quoteId }: { quoteId: string }) {
   const [pending, start] = useTransition();
   return (
     <form
@@ -91,7 +91,7 @@ function AddForm({ quoteId }: { quoteId: string }) {
   );
 }
 
-function DeleteButton({
+export function DeleteQuoteLineButton({
   quoteId,
   lineId,
 }: {
@@ -116,5 +116,3 @@ function DeleteButton({
     </Button>
   );
 }
-
-export const QuoteLineEditor = { AddForm, DeleteButton };

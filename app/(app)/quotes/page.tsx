@@ -1,6 +1,3 @@
-import { db } from "@/db";
-import { client, quote } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +12,7 @@ import {
 import { formatCents } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { Plus } from "lucide-react";
+import { getSupabaseDb, toQuote } from "@/lib/supabase/db";
 
 const STATUS_VARIANTS = {
   DRAFT: "secondary",
@@ -34,15 +32,19 @@ const STATUS_LABELS = {
 
 export default async function QuotesPage() {
   const user = await requireUser();
-  const rows = await db
-    .select({
-      quote,
-      clientName: client.name,
-    })
-    .from(quote)
-    .innerJoin(client, eq(client.id, quote.clientId))
-    .where(eq(quote.userId, user.id))
-    .orderBy(desc(quote.issueDate), desc(quote.createdAt));
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("quote")
+    .select("*, client:client_id(name), project:project_id(name)")
+    .eq("user_id", user.id)
+    .order("issue_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []).map((row) => ({
+    quote: toQuote(row),
+    clientName: Array.isArray(row.client) ? row.client[0]?.name : row.client?.name,
+    projectName: Array.isArray(row.project) ? row.project[0]?.name : row.project?.name,
+  }));
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -78,6 +80,7 @@ export default async function QuotesPage() {
                 <TableHead>Émis le</TableHead>
                 <TableHead>Validité</TableHead>
                 <TableHead>Client</TableHead>
+                <TableHead>Projet</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead>Montant</TableHead>
                 <TableHead></TableHead>
@@ -94,6 +97,9 @@ export default async function QuotesPage() {
                     {formatDate(r.quote.validUntil)}
                   </TableCell>
                   <TableCell>{r.clientName}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {r.projectName ?? "—"}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANTS[r.quote.status]}>
                       {STATUS_LABELS[r.quote.status]}

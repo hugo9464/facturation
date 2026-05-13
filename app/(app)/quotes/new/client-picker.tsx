@@ -17,26 +17,34 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { createDraftQuoteAction } from "@/actions/quotes";
 import {
   getClientMissingFields,
   type MissingField,
 } from "@/lib/billing-readiness";
-import type { Client } from "@/db/schema";
+import type { Client, TodoProject } from "@/db/schema";
+
+type ProjectOption = TodoProject & {
+  client: Client;
+};
 
 export function NewQuotePicker({
-  clients,
+  projects,
+  preselectedProjectId,
   profileMissing,
 }: {
-  clients: Client[];
+  projects: ProjectOption[];
+  preselectedProjectId?: string;
   profileMissing: MissingField[];
 }) {
-  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  const [projectId, setProjectId] = useState(
+    preselectedProjectId ?? projects[0]?.id ?? "",
+  );
   const [pending, start] = useTransition();
 
-  const selectedClient = clients.find((c) => c.id === clientId);
+  const selectedProject = projects.find((project) => project.id === projectId);
+  const selectedClient = selectedProject?.client;
   const clientMissing = useMemo(
     () => (selectedClient ? getClientMissingFields(selectedClient) : []),
     [selectedClient],
@@ -44,26 +52,27 @@ export function NewQuotePicker({
   const billable =
     profileMissing.length === 0 && clientMissing.length === 0;
 
-  if (clients.length === 0) {
+  if (projects.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Aucun client</CardTitle>
+          <CardTitle>Aucun projet</CardTitle>
           <CardDescription>
-            Crée d&apos;abord un client pour pouvoir faire un devis.
+            Crée d&apos;abord un projet rattaché à un client pour pouvoir faire
+            un devis.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ButtonLink href="/clients/new">Créer un client</ButtonLink>
+          <ButtonLink href="/projects">Créer un projet</ButtonLink>
         </CardContent>
       </Card>
     );
   }
 
   function onSubmit() {
-    if (!clientId) return;
+    if (!projectId) return;
     start(async () => {
-      const r = await createDraftQuoteAction({ clientId });
+      const r = await createDraftQuoteAction({ projectId });
       if (r?.error) toast.error(r.error);
     });
   }
@@ -119,22 +128,26 @@ export function NewQuotePicker({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Client</CardTitle>
+          <CardTitle className="text-base">Projet</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            <Label htmlFor="client">Sélectionne le client</Label>
+            <Label htmlFor="project">Sélectionne le projet</Label>
             <Select
-              value={clientId}
-              onValueChange={(v) => v && setClientId(v)}
+              value={projectId}
+              onValueChange={(v) => v && setProjectId(v)}
             >
-              <SelectTrigger id="client" className="w-full">
-                <SelectValue />
+              <SelectTrigger id="project" className="w-full">
+                <span className="truncate">
+                  {selectedProject
+                    ? `${selectedProject.name} · ${selectedProject.client.name}`
+                    : "Projet"}
+                </span>
               </SelectTrigger>
               <SelectContent>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name} · {project.client.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -145,7 +158,7 @@ export function NewQuotePicker({
 
       <Button
         onClick={onSubmit}
-        disabled={pending || !billable || !clientId}
+        disabled={pending || !billable || !projectId}
         size="lg"
       >
         {pending ? "Création…" : "Créer le brouillon"}

@@ -1,9 +1,6 @@
 import Link from "next/link";
-import { db } from "@/db";
-import { client, invoice } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -14,8 +11,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCents } from "@/lib/money";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { Plus } from "lucide-react";
+import { getSupabaseDb, toInvoice } from "@/lib/supabase/db";
 
 const STATUS_VARIANTS = {
   DRAFT: "secondary",
@@ -35,15 +33,19 @@ const STATUS_LABELS = {
 
 export default async function InvoicesPage() {
   const user = await requireUser();
-  const rows = await db
-    .select({
-      invoice,
-      clientName: client.name,
-    })
-    .from(invoice)
-    .innerJoin(client, eq(client.id, invoice.clientId))
-    .where(eq(invoice.userId, user.id))
-    .orderBy(desc(invoice.issueDate), desc(invoice.createdAt));
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("invoice")
+    .select("*, client:client_id(name), project:project_id(name)")
+    .eq("user_id", user.id)
+    .order("issue_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []).map((row) => ({
+    invoice: toInvoice(row),
+    clientName: Array.isArray(row.client) ? row.client[0]?.name : row.client?.name,
+    projectName: Array.isArray(row.project) ? row.project[0]?.name : row.project?.name,
+  }));
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -77,36 +79,69 @@ export default async function InvoicesPage() {
                 <TableHead>N°</TableHead>
                 <TableHead>Émise le</TableHead>
                 <TableHead>Client</TableHead>
+                <TableHead>Projet</TableHead>
                 <TableHead>Statut</TableHead>
+                <TableHead>Email</TableHead>
                 <TableHead>Montant</TableHead>
-                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.invoice.id}>
-                  <TableCell className="font-mono text-sm">
-                    {r.invoice.number ?? "—"}
-                  </TableCell>
-                  <TableCell>{formatDate(r.invoice.issueDate)}</TableCell>
-                  <TableCell>{r.clientName}</TableCell>
-                  <TableCell>
-                    <Badge variant={STATUS_VARIANTS[r.invoice.status]}>
-                      {STATUS_LABELS[r.invoice.status]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{formatCents(r.invoice.totalCents)}</TableCell>
-                  <TableCell className="text-right">
-                    <ButtonLink
-                      href={`/invoices/${r.invoice.id}`}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      Détail
-                    </ButtonLink>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {rows.map((r) => {
+                const href = `/invoices/${r.invoice.id}`;
+                return (
+                  <TableRow key={r.invoice.id} className="cursor-pointer">
+                    <TableCell className="font-mono text-sm">
+                      <Link
+                        href={href}
+                        className="-m-2 block p-2"
+                        aria-label={`Ouvrir la facture ${
+                          r.invoice.number ?? r.invoice.id
+                        }`}
+                      >
+                        {r.invoice.number ?? "—"}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link href={href} className="-m-2 block p-2">
+                        {formatDate(r.invoice.issueDate)}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link href={href} className="-m-2 block p-2">
+                        {r.clientName}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <Link href={href} className="-m-2 block p-2">
+                        {r.projectName ?? "—"}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link href={href} className="-m-2 block p-2">
+                        <Badge variant={STATUS_VARIANTS[r.invoice.status]}>
+                          {STATUS_LABELS[r.invoice.status]}
+                        </Badge>
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link href={href} className="-m-2 block p-2">
+                        {r.invoice.emailSentAt ? (
+                          <span className="text-emerald-600">
+                            Envoyée le {formatDateTime(r.invoice.emailSentAt)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Link href={href} className="-m-2 block p-2">
+                        {formatCents(r.invoice.totalCents)}
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

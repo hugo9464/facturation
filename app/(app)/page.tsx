@@ -1,7 +1,4 @@
 import Link from "next/link";
-import { db } from "@/db";
-import { client, invoice, profile, timeEntry } from "@/db/schema";
-import { and, eq, gte, lte, desc, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import {
   Card,
@@ -15,100 +12,68 @@ import { Badge } from "@/components/ui/badge";
 import { formatCents } from "@/lib/money";
 import { formatDate, startOfMonthISO, startOfYearISO, todayISO } from "@/lib/dates";
 import { plafondLimitCents } from "@/lib/legal";
+import { getProfile, getSupabaseDb, toInvoice, toTimeEntry } from "@/lib/supabase/db";
 
 export default async function DashboardPage() {
   const user = await requireUser();
   const today = todayISO();
   const monthStart = startOfMonthISO();
   const yearStart = startOfYearISO();
+  const supabase = await getSupabaseDb();
 
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const [profileRow, invoicesResult, monthEntriesResult, overdueResult] =
+    await Promise.all([
+      getProfile(user.id),
+      supabase.from("invoice").select("*").eq("user_id", user.id),
+      supabase
+        .from("time_entry")
+        .select("*")
+        .eq("user_id", user.id)
+        .gte("date", monthStart),
+      supabase
+        .from("invoice")
+        .select("*, client:client_id(name)")
+        .eq("user_id", user.id)
+        .eq("status", "SENT")
+        .lte("due_date", today)
+        .order("due_date", { ascending: false })
+        .limit(10),
+    ]);
+  if (invoicesResult.error) throw invoicesResult.error;
+  if (monthEntriesResult.error) throw monthEntriesResult.error;
+  if (overdueResult.error) throw overdueResult.error;
 
-  // Aggregations
-  const [monthCAResult] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${invoice.totalCents}), 0)`,
-    })
-    .from(invoice)
-    .where(
-      and(
-        eq(invoice.userId, user.id),
-        gte(invoice.issueDate, monthStart),
-        sql`${invoice.status} <> 'CANCELLED'`,
-      ),
-    );
-
-  const [yearCAResult] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${invoice.totalCents}), 0)`,
-    })
-    .from(invoice)
-    .where(
-      and(
-        eq(invoice.userId, user.id),
-        gte(invoice.issueDate, yearStart),
-        sql`${invoice.status} <> 'CANCELLED'`,
-      ),
-    );
-
-  const [monthDaysResult] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(
-        CASE ${timeEntry.type}
-          WHEN 'DAY' THEN ${timeEntry.quantity}
-          WHEN 'HALF_DAY' THEN ${timeEntry.quantity} * 0.5
-          WHEN 'HOUR' THEN ${timeEntry.quantity} / 8.0
-          ELSE 0 END
-      ), 0)`,
-    })
-    .from(timeEntry)
-    .where(
-      and(eq(timeEntry.userId, user.id), gte(timeEntry.date, monthStart)),
-    );
-
-  const [unpaidResult] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${invoice.totalCents}), 0)`,
-      count: sql<string>`COUNT(*)`,
-    })
-    .from(invoice)
-    .where(
-      and(
-        eq(invoice.userId, user.id),
-        sql`${invoice.status} IN ('SENT', 'OVERDUE')`,
-      ),
-    );
-
-  const overdueInvoices = await db
-    .select({
+  const invoices = (invoicesResult.data ?? []).map(toInvoice);
+  const monthEntries = (monthEntriesResult.data ?? []).map(toTimeEntry);
+  const billableInvoices = invoices.filter((item) => item.status !== "CANCELLED");
+  const monthCACents = billableInvoices
+    .filter((item) => item.issueDate >= monthStart)
+    .reduce((sum, item) => sum + item.totalCents, 0);
+  const yearCACents = billableInvoices
+    .filter((item) => item.issueDate >= yearStart)
+    .reduce((sum, item) => sum + item.totalCents, 0);
+  const unpaid = invoices.filter(
+    (item) => item.status === "SENT" || item.status === "OVERDUE",
+  );
+  const unpaidCents = unpaid.reduce((sum, item) => sum + item.totalCents, 0);
+  const unpaidCount = unpaid.length;
+  const monthDays = monthEntries.reduce((sum, entry) => {
+    if (entry.type === "DAY") return sum + Number(entry.quantity);
+    if (entry.type === "HALF_DAY") return sum + Number(entry.quantity) * 0.5;
+    if (entry.type === "HOUR") return sum + Number(entry.quantity) / 8;
+    return sum;
+  }, 0);
+  const overdueInvoices = (overdueResult.data ?? []).map((row) => {
+    const invoice = toInvoice(row);
+    return {
       id: invoice.id,
       number: invoice.number,
       totalCents: invoice.totalCents,
       dueDate: invoice.dueDate,
       issueDate: invoice.issueDate,
-      clientName: client.name,
-    })
-    .from(invoice)
-    .innerJoin(client, eq(client.id, invoice.clientId))
-    .where(
-      and(
-        eq(invoice.userId, user.id),
-        sql`${invoice.status} = 'SENT'`,
-        lte(invoice.dueDate, today),
-      ),
-    )
-    .orderBy(desc(invoice.dueDate))
-    .limit(10);
-
-  const monthCACents = Number(monthCAResult.total);
-  const yearCACents = Number(yearCAResult.total);
-  const unpaidCents = Number(unpaidResult.total);
-  const unpaidCount = Number(unpaidResult.count);
-  const monthDays = Number(monthDaysResult.total);
+      clientName: Array.isArray(row.client) ? row.client[0]?.name : row.client?.name,
+    };
+  });
 
   const plafondCents = plafondLimitCents(profileRow?.plafondType ?? "BNC");
   const plafondPct = Math.min(100, (yearCACents / plafondCents) * 100);

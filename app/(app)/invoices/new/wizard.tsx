@@ -17,7 +17,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCents } from "@/lib/money";
@@ -28,7 +27,7 @@ import {
   getClientMissingFields,
   type MissingField,
 } from "@/lib/billing-readiness";
-import type { Client, RateType, TimeEntry } from "@/db/schema";
+import type { Client, RateType, TimeEntry, TodoProject } from "@/db/schema";
 import { AlertCircle, Plus, Trash2 } from "lucide-react";
 
 type DraftLine = {
@@ -39,6 +38,10 @@ type DraftLine = {
   unitType: RateType;
   unitPrice: string;
   timeEntryIds: string[];
+};
+
+type ProjectOption = TodoProject & {
+  client: Client;
 };
 
 const TYPE_LABELS: Record<RateType, string> = {
@@ -67,16 +70,16 @@ function formatUnitPriceInput(cents: number): string {
 
 function getEntriesForPeriod(
   entries: TimeEntry[],
-  clientId: string,
+  projectId: string,
   periodStart: string,
   periodEnd: string,
 ) {
-  if (!clientId || !periodStart || !periodEnd || periodEnd < periodStart) {
+  if (!projectId || !periodStart || !periodEnd || periodEnd < periodStart) {
     return [];
   }
   return entries.filter(
     (entry) =>
-      entry.clientId === clientId &&
+      entry.projectId === projectId &&
       entry.date >= periodStart &&
       entry.date <= periodEnd,
   );
@@ -111,18 +114,18 @@ function lineTotalCents(line: DraftLine): number {
 }
 
 export function NewInvoiceWizard({
-  clients,
+  projects,
   unbilledEntries,
-  preselectedClientId,
+  preselectedProjectId,
   profileMissing,
 }: {
-  clients: Client[];
+  projects: ProjectOption[];
   unbilledEntries: TimeEntry[];
-  preselectedClientId?: string;
+  preselectedProjectId?: string;
   profileMissing: MissingField[];
 }) {
-  const initialClientId = preselectedClientId ?? clients[0]?.id ?? "";
-  const [clientId, setClientId] = useState(initialClientId);
+  const initialProjectId = preselectedProjectId ?? projects[0]?.id ?? "";
+  const [projectId, setProjectId] = useState(initialProjectId);
   const [periodStart, setPeriodStart] = useState(startOfMonthISO());
   const [periodEnd, setPeriodEnd] = useState(todayISO());
   const [manualLines, setManualLines] = useState<DraftLine[]>([]);
@@ -135,8 +138,8 @@ export function NewInvoiceWizard({
   const [pending, start] = useTransition();
 
   const periodEntries = useMemo(
-    () => getEntriesForPeriod(unbilledEntries, clientId, periodStart, periodEnd),
-    [unbilledEntries, clientId, periodStart, periodEnd],
+    () => getEntriesForPeriod(unbilledEntries, projectId, periodStart, periodEnd),
+    [unbilledEntries, projectId, periodStart, periodEnd],
   );
 
   const timeLines = useMemo(
@@ -152,7 +155,8 @@ export function NewInvoiceWizard({
     [timeLines, manualLines],
   );
 
-  const selectedClient = clients.find((c) => c.id === clientId);
+  const selectedProject = projects.find((project) => project.id === projectId);
+  const selectedClient = selectedProject?.client;
   const clientMissing = useMemo(
     () => (selectedClient ? getClientMissingFields(selectedClient) : []),
     [selectedClient],
@@ -195,7 +199,7 @@ export function NewInvoiceWizard({
   }
 
   async function onSubmit() {
-    if (!clientId) return;
+    if (!projectId) return;
     if (periodInvalid) {
       toast.error("La période est invalide");
       return;
@@ -227,7 +231,7 @@ export function NewInvoiceWizard({
 
     start(async () => {
       const result = await createDraftInvoiceAction({
-        clientId,
+        projectId,
         periodStart,
         periodEnd,
         lines: payloadLines,
@@ -236,17 +240,18 @@ export function NewInvoiceWizard({
     });
   }
 
-  if (clients.length === 0) {
+  if (projects.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Aucun client</CardTitle>
+          <CardTitle>Aucun projet</CardTitle>
           <CardDescription>
-            Crée d&apos;abord un client pour pouvoir facturer.
+            Crée d&apos;abord un projet rattaché à un client pour pouvoir
+            facturer.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ButtonLink href="/clients/new">Créer un client</ButtonLink>
+          <ButtonLink href="/projects">Créer un projet</ButtonLink>
         </CardContent>
       </Card>
     );
@@ -307,22 +312,29 @@ export function NewInvoiceWizard({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Client et période</CardTitle>
+          <CardTitle className="text-base">Projet et période</CardTitle>
           <CardDescription>
             Les temps non facturés de la période préremplissent les lignes.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-2 sm:col-span-3">
-            <Label htmlFor="client">Client à facturer</Label>
-            <Select value={clientId} onValueChange={(id) => id && setClientId(id)}>
-              <SelectTrigger id="client" className="w-full">
-                <SelectValue />
+            <Label htmlFor="project">Projet à facturer</Label>
+            <Select
+              value={projectId}
+              onValueChange={(id) => id && setProjectId(id)}
+            >
+              <SelectTrigger id="project" className="w-full">
+                <span className="truncate">
+                  {selectedProject
+                    ? `${selectedProject.name} · ${selectedProject.client.name}`
+                    : "Projet"}
+                </span>
               </SelectTrigger>
               <SelectContent>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name} · {project.client.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -447,7 +459,9 @@ export function NewInvoiceWizard({
                             id={`unit-type-${line.id}`}
                             className="w-full"
                           >
-                            <SelectValue />
+                            <span className="truncate">
+                              {TYPE_LABELS[line.unitType]}
+                            </span>
                           </SelectTrigger>
                           <SelectContent>
                             {Object.entries(TYPE_LABELS).map(([value, label]) => (
@@ -502,7 +516,9 @@ export function NewInvoiceWizard({
         </div>
         <Button
           onClick={onSubmit}
-          disabled={pending || lines.length === 0 || !billable || periodInvalid}
+          disabled={
+            pending || lines.length === 0 || !billable || periodInvalid || !projectId
+          }
           size="lg"
         >
           {pending ? "Création…" : "Créer le brouillon"}

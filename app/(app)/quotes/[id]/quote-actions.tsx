@@ -111,12 +111,10 @@ export function QuoteActions({ quote }: { quote: Quote }) {
       {quote.status === "DRAFT" && (
         <AlertDialog>
           <AlertDialogTrigger
-            render={
-              <Button variant="outline" size="sm">
-                Supprimer
-              </Button>
-            }
-          />
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Supprimer
+          </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Supprimer le brouillon ?</AlertDialogTitle>

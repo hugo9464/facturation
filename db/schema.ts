@@ -1,398 +1,189 @@
-import {
-  pgTable,
-  uuid,
-  text,
-  integer,
-  numeric,
-  date,
-  timestamp,
-  boolean,
-  pgEnum,
-  uniqueIndex,
-  index,
-} from "drizzle-orm/pg-core";
-import { relations, sql } from "drizzle-orm";
+export const rateTypeEnum = {
+  enumValues: ["DAY", "HALF_DAY", "HOUR", "FORFAIT"] as const,
+};
 
-export const rateTypeEnum = pgEnum("rate_type", [
-  "DAY",
-  "HALF_DAY",
-  "HOUR",
-  "FORFAIT",
-]);
+export const invoiceStatusEnum = {
+  enumValues: ["DRAFT", "SENT", "PAID", "OVERDUE", "CANCELLED"] as const,
+};
 
-export const invoiceStatusEnum = pgEnum("invoice_status", [
-  "DRAFT",
-  "SENT",
-  "PAID",
-  "OVERDUE",
-  "CANCELLED",
-]);
+export const plafondTypeEnum = {
+  enumValues: ["BNC", "BIC"] as const,
+};
 
-export const plafondTypeEnum = pgEnum("plafond_type", ["BNC", "BIC"]);
+export const quoteStatusEnum = {
+  enumValues: ["DRAFT", "SENT", "ACCEPTED", "REJECTED", "EXPIRED"] as const,
+};
 
-export const quoteStatusEnum = pgEnum("quote_status", [
-  "DRAFT",
-  "SENT",
-  "ACCEPTED",
-  "REJECTED",
-  "EXPIRED",
-]);
+export const todoStatusEnum = {
+  enumValues: ["TODO", "IN_PROGRESS", "TO_TEST", "DONE"] as const,
+};
 
-export const todoStatusEnum = pgEnum("todo_status", [
-  "BACKLOG",
-  "TODO",
-  "IN_PROGRESS",
-  "TO_TEST",
-  "DONE",
-  "CANCELLED",
-]);
-
-export const profile = pgTable("profile", {
-  userId: uuid("user_id").primaryKey(),
-  businessName: text("business_name").notNull(),
-  siret: text("siret").notNull(),
-  address: text("address").notNull(),
-  email: text("email").notNull(),
-  phone: text("phone"),
-  iban: text("iban"),
-  bic: text("bic"),
-  defaultPaymentTermsDays: integer("default_payment_terms_days")
-    .notNull()
-    .default(30),
-  plafondType: plafondTypeEnum("plafond_type").notNull().default("BNC"),
-  nextInvoiceNumber: integer("next_invoice_number").notNull().default(1),
-  nextQuoteNumber: integer("next_quote_number").notNull().default(1),
-  nextTaskNumber: integer("next_task_number").notNull().default(1),
-  legalMentionExtra: text("legal_mention_extra"),
-  rcsExempt: boolean("rcs_exempt").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
-
-export const client = pgTable(
-  "client",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").notNull(),
-    name: text("name").notNull(),
-    contactName: text("contact_name"),
-    email: text("email"),
-    address: text("address"),
-    siret: text("siret"),
-    vatNumber: text("vat_number"),
-    defaultRateCents: integer("default_rate_cents").notNull().default(0),
-    defaultRateType: rateTypeEnum("default_rate_type").notNull().default("DAY"),
-    notes: text("notes"),
-    archived: boolean("archived").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [index("client_user_idx").on(t.userId)],
-);
-
-export const invoice = pgTable(
-  "invoice",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").notNull(),
-    clientId: uuid("client_id")
-      .notNull()
-      .references(() => client.id, { onDelete: "restrict" }),
-    number: text("number"),
-    issueDate: date("issue_date").notNull(),
-    dueDate: date("due_date").notNull(),
-    status: invoiceStatusEnum("status").notNull().default("DRAFT"),
-    subtotalCents: integer("subtotal_cents").notNull().default(0),
-    totalCents: integer("total_cents").notNull().default(0),
-    currency: text("currency").notNull().default("EUR"),
-    legalMention: text("legal_mention").notNull(),
-    paymentTermsText: text("payment_terms_text").notNull(),
-    notes: text("notes"),
-    pdfStoragePath: text("pdf_storage_path"),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
-    paidAt: timestamp("paid_at", { withTimezone: true }),
-    paymentMethod: text("payment_method"),
-    paymentReference: text("payment_reference"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("invoice_user_number_idx").on(t.userId, t.number),
-    index("invoice_user_status_idx").on(t.userId, t.status),
-    index("invoice_client_idx").on(t.clientId),
-  ],
-);
-
-export const invoiceLine = pgTable(
-  "invoice_line",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    invoiceId: uuid("invoice_id")
-      .notNull()
-      .references(() => invoice.id, { onDelete: "cascade" }),
-    order: integer("order").notNull().default(0),
-    description: text("description").notNull(),
-    quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
-    unitType: rateTypeEnum("unit_type").notNull(),
-    unitPriceCents: integer("unit_price_cents").notNull(),
-    totalCents: integer("total_cents").notNull(),
-    timeEntryIds: uuid("time_entry_ids").array().notNull().default(sql`ARRAY[]::uuid[]`),
-  },
-  (t) => [index("invoice_line_invoice_idx").on(t.invoiceId)],
-);
-
-export const timeEntry = pgTable(
-  "time_entry",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").notNull(),
-    clientId: uuid("client_id")
-      .notNull()
-      .references(() => client.id, { onDelete: "restrict" }),
-    date: date("date").notNull(),
-    type: rateTypeEnum("type").notNull(),
-    quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
-    rateCents: integer("rate_cents").notNull(),
-    description: text("description"),
-    invoiceId: uuid("invoice_id").references(() => invoice.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    index("time_entry_user_date_idx").on(t.userId, t.date),
-    index("time_entry_client_idx").on(t.clientId),
-    index("time_entry_invoice_idx").on(t.invoiceId),
-  ],
-);
-
-export const quote = pgTable(
-  "quote",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").notNull(),
-    clientId: uuid("client_id")
-      .notNull()
-      .references(() => client.id, { onDelete: "restrict" }),
-    number: text("number"),
-    issueDate: date("issue_date").notNull(),
-    validUntil: date("valid_until").notNull(),
-    status: quoteStatusEnum("status").notNull().default("DRAFT"),
-    subtotalCents: integer("subtotal_cents").notNull().default(0),
-    totalCents: integer("total_cents").notNull().default(0),
-    currency: text("currency").notNull().default("EUR"),
-    legalMention: text("legal_mention").notNull(),
-    paymentTermsText: text("payment_terms_text").notNull(),
-    notes: text("notes"),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
-    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
-    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
-    convertedInvoiceId: uuid("converted_invoice_id").references(
-      () => invoice.id,
-      { onDelete: "set null" },
-    ),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("quote_user_number_idx").on(t.userId, t.number),
-    index("quote_user_status_idx").on(t.userId, t.status),
-    index("quote_client_idx").on(t.clientId),
-  ],
-);
-
-export const quoteLine = pgTable(
-  "quote_line",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    quoteId: uuid("quote_id")
-      .notNull()
-      .references(() => quote.id, { onDelete: "cascade" }),
-    order: integer("order").notNull().default(0),
-    description: text("description").notNull(),
-    quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
-    unitType: rateTypeEnum("unit_type").notNull(),
-    unitPriceCents: integer("unit_price_cents").notNull(),
-    totalCents: integer("total_cents").notNull(),
-  },
-  (t) => [index("quote_line_quote_idx").on(t.quoteId)],
-);
-
-export const todoProject = pgTable(
-  "todo_project",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => profile.userId, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    order: integer("order").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    index("todo_project_user_order_idx").on(t.userId, t.order),
-    uniqueIndex("todo_project_user_name_idx").on(t.userId, t.name),
-  ],
-);
-
-export const todoTask = pgTable(
-  "todo_task",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => profile.userId, { onDelete: "cascade" }),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => todoProject.id, { onDelete: "restrict" }),
-    number: integer("number").notNull(),
-    title: text("title").notNull(),
-    description: text("description"),
-    status: todoStatusEnum("status").notNull().default("TODO"),
-    order: integer("order").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("todo_task_user_number_idx").on(t.userId, t.number),
-    index("todo_task_project_status_order_idx").on(
-      t.projectId,
-      t.status,
-      t.order,
-    ),
-    index("todo_task_user_status_order_idx").on(t.userId, t.status, t.order),
-  ],
-);
-
-export const profileRelations = relations(profile, ({ many }) => ({
-  clients: many(client),
-  invoices: many(invoice),
-  timeEntries: many(timeEntry),
-  todoTasks: many(todoTask),
-  todoProjects: many(todoProject),
-}));
-
-export const clientRelations = relations(client, ({ many }) => ({
-  timeEntries: many(timeEntry),
-  invoices: many(invoice),
-  quotes: many(quote),
-}));
-
-export const quoteRelations = relations(quote, ({ one, many }) => ({
-  client: one(client, {
-    fields: [quote.clientId],
-    references: [client.id],
-  }),
-  lines: many(quoteLine),
-  convertedInvoice: one(invoice, {
-    fields: [quote.convertedInvoiceId],
-    references: [invoice.id],
-  }),
-}));
-
-export const quoteLineRelations = relations(quoteLine, ({ one }) => ({
-  quote: one(quote, {
-    fields: [quoteLine.quoteId],
-    references: [quote.id],
-  }),
-}));
-
-export const invoiceRelations = relations(invoice, ({ one, many }) => ({
-  client: one(client, {
-    fields: [invoice.clientId],
-    references: [client.id],
-  }),
-  lines: many(invoiceLine),
-  timeEntries: many(timeEntry),
-}));
-
-export const invoiceLineRelations = relations(invoiceLine, ({ one }) => ({
-  invoice: one(invoice, {
-    fields: [invoiceLine.invoiceId],
-    references: [invoice.id],
-  }),
-}));
-
-export const timeEntryRelations = relations(timeEntry, ({ one }) => ({
-  client: one(client, {
-    fields: [timeEntry.clientId],
-    references: [client.id],
-  }),
-  invoice: one(invoice, {
-    fields: [timeEntry.invoiceId],
-    references: [invoice.id],
-  }),
-}));
-
-export const todoTaskRelations = relations(todoTask, ({ one }) => ({
-  profile: one(profile, {
-    fields: [todoTask.userId],
-    references: [profile.userId],
-  }),
-  project: one(todoProject, {
-    fields: [todoTask.projectId],
-    references: [todoProject.id],
-  }),
-}));
-
-export const todoProjectRelations = relations(todoProject, ({ one, many }) => ({
-  profile: one(profile, {
-    fields: [todoProject.userId],
-    references: [profile.userId],
-  }),
-  tasks: many(todoTask),
-}));
-
-export type Profile = typeof profile.$inferSelect;
-export type NewProfile = typeof profile.$inferInsert;
-export type Client = typeof client.$inferSelect;
-export type NewClient = typeof client.$inferInsert;
-export type Invoice = typeof invoice.$inferSelect;
-export type NewInvoice = typeof invoice.$inferInsert;
-export type InvoiceLine = typeof invoiceLine.$inferSelect;
-export type NewInvoiceLine = typeof invoiceLine.$inferInsert;
-export type TimeEntry = typeof timeEntry.$inferSelect;
-export type NewTimeEntry = typeof timeEntry.$inferInsert;
-export type Quote = typeof quote.$inferSelect;
-export type NewQuote = typeof quote.$inferInsert;
-export type QuoteLine = typeof quoteLine.$inferSelect;
-export type NewQuoteLine = typeof quoteLine.$inferInsert;
-export type TodoTask = typeof todoTask.$inferSelect;
-export type NewTodoTask = typeof todoTask.$inferInsert;
-export type TodoProject = typeof todoProject.$inferSelect;
-export type NewTodoProject = typeof todoProject.$inferInsert;
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
 export type TodoStatus = (typeof todoStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
+
+export type Profile = {
+  userId: string;
+  businessName: string;
+  siret: string;
+  address: string;
+  email: string;
+  phone: string | null;
+  iban: string | null;
+  bic: string | null;
+  defaultPaymentTermsDays: number;
+  plafondType: PlafondType;
+  nextInvoiceNumber: number;
+  nextQuoteNumber: number;
+  nextTaskNumber: number;
+  legalMentionExtra: string | null;
+  rcsExempt: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewProfile = Omit<Profile, "createdAt" | "updatedAt">;
+
+export type Client = {
+  id: string;
+  userId: string;
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  address: string | null;
+  siret: string | null;
+  vatNumber: string | null;
+  defaultRateCents: number;
+  defaultRateType: RateType;
+  notes: string | null;
+  archived: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewClient = Omit<Client, "id" | "createdAt" | "updatedAt">;
+
+export type Invoice = {
+  id: string;
+  userId: string;
+  clientId: string;
+  projectId: string | null;
+  number: string | null;
+  issueDate: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  subtotalCents: number;
+  totalCents: number;
+  currency: string;
+  legalMention: string;
+  paymentTermsText: string;
+  notes: string | null;
+  pdfStoragePath: string | null;
+  sentAt: Date | null;
+  emailSentAt: Date | null;
+  paidAt: Date | null;
+  paymentMethod: string | null;
+  paymentReference: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewInvoice = Omit<Invoice, "id" | "createdAt" | "updatedAt">;
+
+export type InvoiceLine = {
+  id: string;
+  invoiceId: string;
+  order: number;
+  description: string;
+  quantity: string;
+  unitType: RateType;
+  unitPriceCents: number;
+  totalCents: number;
+  timeEntryIds: string[];
+};
+
+export type NewInvoiceLine = Omit<InvoiceLine, "id">;
+
+export type TimeEntry = {
+  id: string;
+  userId: string;
+  clientId: string;
+  projectId: string | null;
+  date: string;
+  type: RateType;
+  quantity: string;
+  rateCents: number;
+  description: string | null;
+  invoiceId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewTimeEntry = Omit<TimeEntry, "id" | "createdAt" | "updatedAt">;
+
+export type Quote = {
+  id: string;
+  userId: string;
+  clientId: string;
+  projectId: string | null;
+  number: string | null;
+  issueDate: string;
+  validUntil: string;
+  status: QuoteStatus;
+  subtotalCents: number;
+  totalCents: number;
+  currency: string;
+  legalMention: string;
+  paymentTermsText: string;
+  notes: string | null;
+  sentAt: Date | null;
+  acceptedAt: Date | null;
+  rejectedAt: Date | null;
+  convertedInvoiceId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewQuote = Omit<Quote, "id" | "createdAt" | "updatedAt">;
+
+export type QuoteLine = {
+  id: string;
+  quoteId: string;
+  order: number;
+  description: string;
+  quantity: string;
+  unitType: RateType;
+  unitPriceCents: number;
+  totalCents: number;
+};
+
+export type NewQuoteLine = Omit<QuoteLine, "id">;
+
+export type TodoProject = {
+  id: string;
+  userId: string;
+  clientId: string | null;
+  name: string;
+  order: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewTodoProject = Omit<TodoProject, "id" | "createdAt" | "updatedAt">;
+
+export type TodoTask = {
+  id: string;
+  userId: string;
+  projectId: string;
+  number: number;
+  title: string;
+  description: string | null;
+  status: TodoStatus;
+  order: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewTodoTask = Omit<TodoTask, "id" | "createdAt" | "updatedAt">;

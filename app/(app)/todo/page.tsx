@@ -1,11 +1,10 @@
-import { asc, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { todoProject, todoTask } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { TodoWorkspace } from "./todo-workspace";
 import type { TodoProjectView, TodoTaskView } from "@/actions/todo";
+import { getSupabaseDb, toTodoProject, toTodoTask } from "@/lib/supabase/db";
+import type { TodoProject, TodoTask } from "@/db/schema";
 
-function serializeTask(task: typeof todoTask.$inferSelect): TodoTaskView {
+function serializeTask(task: TodoTask): TodoTaskView {
   return {
     ...task,
     createdAt: task.createdAt.toISOString(),
@@ -13,7 +12,7 @@ function serializeTask(task: typeof todoTask.$inferSelect): TodoTaskView {
   };
 }
 
-function serializeProject(project: typeof todoProject.$inferSelect): TodoProjectView {
+function serializeProject(project: TodoProject): TodoProjectView {
   return {
     ...project,
     createdAt: project.createdAt.toISOString(),
@@ -23,30 +22,36 @@ function serializeProject(project: typeof todoProject.$inferSelect): TodoProject
 
 export default async function TodoPage() {
   const user = await requireUser();
-  let projects = await db
-    .select()
-    .from(todoProject)
-    .where(eq(todoProject.userId, user.id))
-    .orderBy(asc(todoProject.order), asc(todoProject.createdAt));
+  const supabase = await getSupabaseDb();
+  const { data: projectRows, error: projectsError } = await supabase
+    .from("todo_project")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (projectsError) throw projectsError;
+  let projects = (projectRows ?? []).map(toTodoProject);
 
   if (projects.length === 0) {
-    const [project] = await db
-      .insert(todoProject)
-      .values({ userId: user.id, name: "Général", order: 0 })
-      .returning();
-    projects = project ? [project] : [];
+    const { data, error } = await supabase
+      .from("todo_project")
+      .insert({ user_id: user.id, name: "Général", order: 0 })
+      .select("*")
+      .single();
+    if (error) throw error;
+    projects = [toTodoProject(data)];
   }
 
-  const tasks = await db
-    .select()
-    .from(todoTask)
-    .where(eq(todoTask.userId, user.id))
-    .orderBy(
-      asc(todoTask.projectId),
-      asc(todoTask.status),
-      asc(todoTask.order),
-      asc(todoTask.createdAt),
-    );
+  const { data: taskRows, error: tasksError } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("project_id", { ascending: true })
+    .order("status", { ascending: true })
+    .order("order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (tasksError) throw tasksError;
+  const tasks = (taskRows ?? []).map(toTodoTask);
 
   return (
     <TodoWorkspace

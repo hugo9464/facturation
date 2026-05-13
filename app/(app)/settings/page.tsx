@@ -1,17 +1,11 @@
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import { profile } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { SettingsForm } from "./settings-form";
+import { getProfile } from "@/lib/supabase/db";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [row] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const row = await getProfile(user.id);
   if (!row) redirect("/onboarding");
   return (
     <div className="max-w-2xl space-y-6">

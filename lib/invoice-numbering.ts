@@ -1,23 +1,24 @@
-import { db } from "@/db";
-import { profile } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { getProfile, getSupabaseDb } from "@/lib/supabase/db";
 
 export async function allocateInvoiceNumber(
   userId: string,
   issueDate: Date,
 ): Promise<string> {
   const year = issueDate.getFullYear();
-  const [row] = await db
-    .update(profile)
-    .set({
-      nextInvoiceNumber: sql`${profile.nextInvoiceNumber} + 1`,
-      updatedAt: new Date(),
+  const month = String(issueDate.getMonth() + 1).padStart(2, "0");
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("Profile not found — set up settings first");
+  const seq = profile.nextInvoiceNumber;
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("profile")
+    .update({
+      next_invoice_number: seq + 1,
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(profile.userId, userId))
-    .returning({ next: profile.nextInvoiceNumber });
-  if (!row) throw new Error("Profile not found — set up settings first");
-  const seq = row.next - 1;
-  return `${year}-${String(seq).padStart(3, "0")}`;
+    .eq("user_id", userId);
+  if (error) throw error;
+  return `FACTURE-${year}-${month}-${String(seq).padStart(4, "0")}`;
 }
 
 export async function allocateQuoteNumber(
@@ -25,15 +26,17 @@ export async function allocateQuoteNumber(
   issueDate: Date,
 ): Promise<string> {
   const year = issueDate.getFullYear();
-  const [row] = await db
-    .update(profile)
-    .set({
-      nextQuoteNumber: sql`${profile.nextQuoteNumber} + 1`,
-      updatedAt: new Date(),
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("Profile not found");
+  const seq = profile.nextQuoteNumber;
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("profile")
+    .update({
+      next_quote_number: seq + 1,
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(profile.userId, userId))
-    .returning({ next: profile.nextQuoteNumber });
-  if (!row) throw new Error("Profile not found");
-  const seq = row.next - 1;
+    .eq("user_id", userId);
+  if (error) throw error;
   return `D${year}-${String(seq).padStart(3, "0")}`;
 }

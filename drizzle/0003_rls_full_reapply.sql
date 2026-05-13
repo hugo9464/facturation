@@ -1,5 +1,5 @@
 -- Idempotent RLS reapply for all tables.
--- Run this after any drizzle-kit push that drops policies.
+-- Reapply policies after schema changes that drop them.
 
 -- Ensure profile FK to auth.users (idempotent)
 DO $$

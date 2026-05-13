@@ -24,17 +24,38 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   cancelInvoiceAction,
   emitInvoiceAction,
   markInvoicePaidAction,
+  sendInvoiceEmailAction,
 } from "@/actions/invoices";
 import type { Invoice } from "@/db/schema";
-import { Download } from "lucide-react";
+import { Download, Send } from "lucide-react";
 
-export function InvoiceActions({ invoice }: { invoice: Invoice }) {
+export function InvoiceActions({
+  invoice,
+  clientEmail,
+}: {
+  invoice: Invoice;
+  clientEmail: string | null;
+}) {
   const [pending, start] = useTransition();
   const [paidOpen, setPaidOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [emailSubject, setEmailSubject] = useState(
+    `Facture ${invoice.number ?? ""}`.trim(),
+  );
+  const [emailBody, setEmailBody] = useState(
+    [
+      "Bonjour,",
+      "",
+      `Vous trouverez ci-joint la facture ${invoice.number ?? ""}.`,
+      "",
+      "Bien cordialement,",
+    ].join("\n"),
+  );
 
   const onEmit = () => {
     if (
@@ -75,6 +96,73 @@ export function InvoiceActions({ invoice }: { invoice: Invoice }) {
         PDF
       </a>
 
+      {invoice.status !== "DRAFT" && invoice.status !== "CANCELLED" && (
+        <Dialog open={sendOpen} onOpenChange={setSendOpen}>
+          <DialogTrigger
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            disabled={!clientEmail}
+            title={
+              clientEmail
+                ? `Envoyer à ${clientEmail}`
+                : "Ajoute un email au client avant l'envoi"
+            }
+          >
+            <Send className="size-4" />
+            Envoyer
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Envoyer la facture</DialogTitle>
+            </DialogHeader>
+            <form
+              className="space-y-4"
+              action={(formData) => {
+                start(async () => {
+                  const r = await sendInvoiceEmailAction(invoice.id, formData);
+                  if ("error" in r && r.error) toast.error(r.error);
+                  else {
+                    toast.success(r.success);
+                    setSendOpen(false);
+                  }
+                });
+              }}
+            >
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">À</p>
+                <p className="text-sm font-medium">{clientEmail}</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email_subject">Objet</Label>
+                <Input
+                  id="email_subject"
+                  name="subject"
+                  value={emailSubject}
+                  onChange={(event) => setEmailSubject(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email_body">Message</Label>
+                <Textarea
+                  id="email_body"
+                  name="body"
+                  value={emailBody}
+                  onChange={(event) => setEmailBody(event.target.value)}
+                  rows={8}
+                  required
+                />
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={pending || !clientEmail}>
+                  <Send className="size-4" />
+                  {pending ? "Envoi..." : "Envoyer l'email"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {invoice.status === "DRAFT" && (
         <Button onClick={onEmit} disabled={pending} size="sm">
           {pending ? "Émission…" : "Émettre"}
@@ -83,7 +171,9 @@ export function InvoiceActions({ invoice }: { invoice: Invoice }) {
 
       {(invoice.status === "SENT" || invoice.status === "OVERDUE") && (
         <Dialog open={paidOpen} onOpenChange={setPaidOpen}>
-          <DialogTrigger render={<Button size="sm">Marquer payée</Button>} />
+          <DialogTrigger className={buttonVariants({ size: "sm" })}>
+            Marquer payée
+          </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Encaissement</DialogTitle>
@@ -127,12 +217,10 @@ export function InvoiceActions({ invoice }: { invoice: Invoice }) {
       {invoice.status !== "CANCELLED" && invoice.status !== "PAID" && (
         <AlertDialog>
           <AlertDialogTrigger
-            render={
-              <Button variant="outline" size="sm">
-                {invoice.status === "DRAFT" ? "Supprimer" : "Annuler"}
-              </Button>
-            }
-          />
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            {invoice.status === "DRAFT" ? "Supprimer" : "Annuler"}
+          </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>

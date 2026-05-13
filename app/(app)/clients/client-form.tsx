@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +29,23 @@ export function ClientForm({
 }) {
   const formAction = action ?? createClientAction;
   const [state, dispatch, pending] = useActionState(formAction, null);
+  const [values, setValues] = useState({
+    name: initial?.name ?? "",
+    contactName: initial?.contactName ?? "",
+    email: initial?.email ?? "",
+    address: initial?.address ?? "",
+    siret: initial?.siret ?? "",
+    vatNumber: initial?.vatNumber ?? "",
+    defaultRate: initial
+      ? centsToEuros(initial.defaultRateCents).toFixed(2)
+      : "",
+    notes: initial?.notes ?? "",
+  });
+
+  function updateValue(field: keyof typeof values, value: string) {
+    setValues((current) => ({ ...current, [field]: value }));
+  }
+
   return (
     <form action={dispatch} className="space-y-6 max-w-2xl">
       <section className="space-y-4">
@@ -39,7 +56,8 @@ export function ClientForm({
             <Input
               id="name"
               name="name"
-              defaultValue={initial?.name ?? ""}
+              value={values.name}
+              onChange={(event) => updateValue("name", event.target.value)}
               required
             />
           </div>
@@ -48,7 +66,10 @@ export function ClientForm({
             <Input
               id="contact_name"
               name="contact_name"
-              defaultValue={initial?.contactName ?? ""}
+              value={values.contactName}
+              onChange={(event) =>
+                updateValue("contactName", event.target.value)
+              }
             />
           </div>
           <div className="space-y-2">
@@ -57,7 +78,8 @@ export function ClientForm({
               id="email"
               name="email"
               type="email"
-              defaultValue={initial?.email ?? ""}
+              value={values.email}
+              onChange={(event) => updateValue("email", event.target.value)}
             />
           </div>
           <div className="space-y-2 sm:col-span-2">
@@ -65,7 +87,8 @@ export function ClientForm({
             <Textarea
               id="address"
               name="address"
-              defaultValue={initial?.address ?? ""}
+              value={values.address}
+              onChange={(event) => updateValue("address", event.target.value)}
               rows={3}
             />
           </div>
@@ -74,7 +97,8 @@ export function ClientForm({
             <Input
               id="siret"
               name="siret"
-              defaultValue={initial?.siret ?? ""}
+              value={values.siret}
+              onChange={(event) => updateValue("siret", event.target.value)}
             />
           </div>
           <div className="space-y-2">
@@ -82,7 +106,10 @@ export function ClientForm({
             <Input
               id="vat_number"
               name="vat_number"
-              defaultValue={initial?.vatNumber ?? ""}
+              value={values.vatNumber}
+              onChange={(event) =>
+                updateValue("vatNumber", event.target.value)
+              }
             />
           </div>
         </div>
@@ -101,8 +128,9 @@ export function ClientForm({
               type="number"
               step="0.01"
               min="0"
-              defaultValue={
-                initial ? centsToEuros(initial.defaultRateCents).toFixed(2) : ""
+              value={values.defaultRate}
+              onChange={(event) =>
+                updateValue("defaultRate", event.target.value)
               }
               required
             />
@@ -129,7 +157,8 @@ export function ClientForm({
             <Textarea
               id="notes"
               name="notes"
-              defaultValue={initial?.notes ?? ""}
+              value={values.notes}
+              onChange={(event) => updateValue("notes", event.target.value)}
               rows={2}
             />
           </div>

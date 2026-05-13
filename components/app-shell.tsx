@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Clock,
+  FolderKanban,
   ListTodo,
   Users,
   FileText,
@@ -17,10 +18,18 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/actions/auth";
 import { TimeEntryDialog } from "@/components/time-entry-dialog";
-import type { Client } from "@/db/schema";
+import type { TimeEntryProjectOption } from "@/components/time-entry-dialog";
+
+type SidebarProject = {
+  id: string;
+  name: string;
+  clientName: string | null;
+  clientArchived: boolean;
+};
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/projects", label: "Projets", icon: FolderKanban },
   { href: "/time", label: "Temps", icon: Clock },
   { href: "/todo", label: "Todo", icon: ListTodo },
   { href: "/clients", label: "Clients", icon: Users },
@@ -36,11 +45,13 @@ function isActive(pathname: string, href: string): boolean {
 export function AppShell({
   children,
   email,
-  clients,
+  projects,
+  sidebarProjects,
 }: {
   children: React.ReactNode;
   email: string;
-  clients: Client[];
+  projects: TimeEntryProjectOption[];
+  sidebarProjects: SidebarProject[];
 }) {
   const pathname = usePathname();
   return (
@@ -52,7 +63,8 @@ export function AppShell({
             Facturation
           </Link>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          <nav className="space-y-1">
           {NAV.map((item) => {
             const Icon = item.icon;
             const active = isActive(pathname, item.href);
@@ -72,7 +84,55 @@ export function AppShell({
               </Link>
             );
           })}
-        </nav>
+          </nav>
+
+          <div className="mt-6 border-t border-sidebar-border pt-4">
+            <div className="mb-2 flex items-center justify-between px-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">
+                Projets
+              </p>
+              <Link
+                href="/projects"
+                className="text-xs text-muted-foreground hover:text-sidebar-accent-foreground"
+              >
+                Tout
+              </Link>
+            </div>
+            <nav className="space-y-1">
+              {sidebarProjects.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">
+                  Aucun projet
+                </p>
+              ) : (
+                sidebarProjects.map((project) => {
+                  const href = `/projects/${project.id}`;
+                  const active = isActive(pathname, href);
+                  return (
+                    <Link
+                      key={project.id}
+                      href={href}
+                      className={cn(
+                        "block rounded-md px-3 py-2 text-sm transition-colors",
+                        active
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium ring-1 ring-sidebar-border"
+                          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+                      )}
+                    >
+                      <span className="block truncate">{project.name}</span>
+                      <span className="block truncate text-[11px] font-normal opacity-75">
+                        {project.clientName
+                          ? project.clientArchived
+                            ? `${project.clientName} · archivé`
+                            : project.clientName
+                          : "Client à assigner"}
+                      </span>
+                    </Link>
+                  );
+                })
+              )}
+            </nav>
+          </div>
+        </div>
         <div className="space-y-1 border-t border-sidebar-border px-3 py-3">
           <Link
             href="/settings"
@@ -106,7 +166,7 @@ export function AppShell({
         <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur md:px-6">
           <div className="md:hidden text-base font-semibold">Facturation</div>
           <div className="flex-1" />
-          <TimeEntryDialog clients={clients}>
+          <TimeEntryDialog projects={projects}>
             <Button size="sm" className="gap-1.5">
               <Plus className="size-4" />
               <span className="hidden sm:inline">Logger temps</span>
@@ -120,7 +180,7 @@ export function AppShell({
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-6 border-t bg-background/95 backdrop-blur md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-7 border-t bg-background/95 backdrop-blur md:hidden">
         {NAV.map((item) => {
           const Icon = item.icon;
           const active = isActive(pathname, item.href);

@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,9 +17,10 @@ import {
 import {
   addInvoiceLineAction,
   deleteInvoiceLineAction,
+  updateInvoiceLineDescriptionAction,
 } from "@/actions/invoices";
 
-function AddForm({ invoiceId }: { invoiceId: string }) {
+export function AddInvoiceLineForm({ invoiceId }: { invoiceId: string }) {
   const [pending, start] = useTransition();
   return (
     <form
@@ -91,7 +93,7 @@ function AddForm({ invoiceId }: { invoiceId: string }) {
   );
 }
 
-function DeleteButton({
+export function DeleteInvoiceLineButton({
   invoiceId,
   lineId,
 }: {
@@ -117,4 +119,76 @@ function DeleteButton({
   );
 }
 
-export const DraftLineEditor = { AddForm, DeleteButton };
+export function EditInvoiceLineDescription({
+  invoiceId,
+  lineId,
+  description,
+}: {
+  invoiceId: string;
+  lineId: string;
+  description: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [pending, start] = useTransition();
+
+  if (!editing) {
+    return (
+      <div className="group/line flex items-start gap-2">
+        <span className="min-w-0 flex-1">{description}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 opacity-0 transition-opacity group-hover/line:opacity-100 focus-visible:opacity-100"
+          aria-label="Modifier la description"
+          onClick={() => setEditing(true)}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="space-y-2"
+      action={(formData) => {
+        start(async () => {
+          const result = await updateInvoiceLineDescriptionAction(
+            invoiceId,
+            lineId,
+            formData,
+          );
+          if (result?.error) {
+            toast.error(result.error);
+          } else {
+            toast.success("Description mise à jour");
+            setEditing(false);
+          }
+        });
+      }}
+    >
+      <Input
+        name="description"
+        defaultValue={description}
+        disabled={pending}
+        autoFocus
+        required
+      />
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={pending}>
+          {pending ? "Enregistrement..." : "Enregistrer"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          onClick={() => setEditing(false)}
+        >
+          Annuler
+        </Button>
+      </div>
+    </form>
+  );
+}

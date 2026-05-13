@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, sql } from "drizzle-orm";
-import { db } from "@/db";
 import {
-  profile,
-  todoProject,
-  todoTask,
+  getProfile,
+  getSupabaseDb,
+  toTodoProject,
+  toTodoTask,
+} from "@/lib/supabase/db";
+import {
   todoStatusEnum,
   type TodoProject,
   type TodoTask,
@@ -20,6 +21,7 @@ const projectIdSchema = z.string().uuid();
 
 const projectSchema = z.object({
   name: z.string().trim().min(1, "Nom requis").max(80, "Nom trop long"),
+  clientId: z.string().uuid().nullable().optional(),
 });
 
 const createSchema = z.object({
@@ -78,51 +80,46 @@ function isUniqueViolation(error: unknown) {
   );
 }
 
-async function getProjectForUser(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  userId: string,
-  projectId: string,
-) {
-  const [project] = await tx
-    .select()
-    .from(todoProject)
-    .where(and(eq(todoProject.id, projectId), eq(todoProject.userId, userId)))
+async function getProjectForUser(userId: string, projectId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("todo_project")
+    .select("*")
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toTodoProject(data) : null;
+}
+
+async function nextProjectOrder(userId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("todo_project")
+    .select("order")
+    .eq("user_id", userId)
+    .order("order", { ascending: false })
     .limit(1);
-  return project ?? null;
+  if (error) throw error;
+  return (data?.[0]?.order ?? -1) + 1;
 }
 
-async function nextOrderForProject(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  userId: string,
-) {
-  const [row] = await tx
-    .select({
-      nextOrder: sql<number>`coalesce(max(${todoProject.order}), -1) + 1`,
-    })
-    .from(todoProject)
-    .where(eq(todoProject.userId, userId));
-  return row?.nextOrder ?? 0;
-}
-
-async function nextOrderForStatus(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+async function nextTaskOrder(
   userId: string,
   projectId: string,
   status: z.infer<typeof statusSchema>,
 ) {
-  const [row] = await tx
-    .select({
-      nextOrder: sql<number>`coalesce(max(${todoTask.order}), -1) + 1`,
-    })
-    .from(todoTask)
-    .where(
-      and(
-        eq(todoTask.userId, userId),
-        eq(todoTask.projectId, projectId),
-        eq(todoTask.status, status),
-      ),
-    );
-  return row?.nextOrder ?? 0;
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("todo_task")
+    .select("order")
+    .eq("user_id", userId)
+    .eq("project_id", projectId)
+    .eq("status", status)
+    .order("order", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0]?.order ?? -1) + 1;
 }
 
 export async function createTodoProjectAction(input: unknown) {
@@ -132,27 +129,38 @@ export async function createTodoProjectAction(input: unknown) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
 
-  try {
-    const project = await db.transaction(async (tx) => {
-      const order = await nextOrderForProject(tx, user.id);
-      const [row] = await tx
-        .insert(todoProject)
-        .values({
-          userId: user.id,
-          name: parsed.data.name,
-          order,
-        })
-        .returning();
+  const supabase = await getSupabaseDb();
+  if (parsed.data.clientId) {
+    const { data: clientRow, error } = await supabase
+      .from("client")
+      .select("id")
+      .eq("id", parsed.data.clientId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!clientRow) return { error: "Client introuvable" };
+  }
 
-      return row;
-    });
+  const order = await nextProjectOrder(user.id);
+  const { data, error } = await supabase
+    .from("todo_project")
+    .insert({
+      user_id: user.id,
+      client_id: parsed.data.clientId ?? null,
+      name: parsed.data.name,
+      order,
+    })
+    .select("*")
+    .single();
 
-    revalidatePath("/todo");
-    return { project: serializeProject(project) };
-  } catch (error) {
+  if (error) {
     if (isUniqueViolation(error)) return { error: "Ce projet existe déjà" };
     throw error;
   }
+
+  revalidatePath("/todo");
+  revalidatePath("/projects");
+  return { project: serializeProject(toTodoProject(data)) };
 }
 
 export async function updateTodoProjectAction(id: string, input: unknown) {
@@ -162,54 +170,99 @@ export async function updateTodoProjectAction(id: string, input: unknown) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
 
-  try {
-    const [project] = await db
-      .update(todoProject)
-      .set({
-        name: parsed.data.name,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(todoProject.id, id), eq(todoProject.userId, user.id)))
-      .returning();
+  const supabase = await getSupabaseDb();
+  if (parsed.data.clientId) {
+    const { data: clientRow, error } = await supabase
+      .from("client")
+      .select("id")
+      .eq("id", parsed.data.clientId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!clientRow) return { error: "Projet ou client introuvable" };
+  }
 
-    if (!project) return { error: "Projet introuvable" };
+  const { data, error } = await supabase
+    .from("todo_project")
+    .update({
+      client_id: parsed.data.clientId ?? null,
+      name: parsed.data.name,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("*")
+    .maybeSingle();
 
-    revalidatePath("/todo");
-    return { project: serializeProject(project) };
-  } catch (error) {
+  if (error) {
     if (isUniqueViolation(error)) return { error: "Ce projet existe déjà" };
     throw error;
   }
+  if (!data) return { error: "Projet ou client introuvable" };
+
+  revalidatePath("/todo");
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${id}`);
+  return { project: serializeProject(toTodoProject(data)) };
 }
 
 export async function deleteTodoProjectAction(id: string) {
   const user = await requireUser();
+  const supabase = await getSupabaseDb();
+  const project = await getProjectForUser(user.id, id);
+  if (!project) return { error: "Projet introuvable" };
 
-  const result = await db.transaction(async (tx) => {
-    const project = await getProjectForUser(tx, user.id, id);
-    if (!project) return { error: "Projet introuvable" };
+  const [tasks, entries, invoices, quotes] = await Promise.all([
+    supabase
+      .from("todo_task")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("project_id", id),
+    supabase
+      .from("time_entry")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("project_id", id),
+    supabase
+      .from("invoice")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("project_id", id),
+    supabase
+      .from("quote")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("project_id", id),
+  ]);
 
-    const [taskCount] = await tx
-      .select({ count: sql<number>`count(*)::int` })
-      .from(todoTask)
-      .where(and(eq(todoTask.userId, user.id), eq(todoTask.projectId, id)));
+  for (const result of [tasks, entries, invoices, quotes]) {
+    if (result.error) throw result.error;
+  }
 
-    if ((taskCount?.count ?? 0) > 0) {
-      return { error: "Impossible de supprimer un projet contenant des tâches" };
-    }
+  if (
+    (tasks.count ?? 0) > 0 ||
+    (entries.count ?? 0) > 0 ||
+    (invoices.count ?? 0) > 0 ||
+    (quotes.count ?? 0) > 0
+  ) {
+    return {
+      error:
+        "Impossible de supprimer un projet contenant des tâches, temps, devis ou factures",
+    };
+  }
 
-    const [deleted] = await tx
-      .delete(todoProject)
-      .where(and(eq(todoProject.id, id), eq(todoProject.userId, user.id)))
-      .returning({ id: todoProject.id });
-
-    return { id: deleted.id };
-  });
-
-  if ("error" in result && result.error) return result;
+  const { data, error } = await supabase
+    .from("todo_project")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("id")
+    .single();
+  if (error) throw error;
 
   revalidatePath("/todo");
-  return result;
+  revalidatePath("/projects");
+  return { id: data.id };
 }
 
 export async function createTodoTaskAction(input: unknown) {
@@ -219,47 +272,44 @@ export async function createTodoTaskAction(input: unknown) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
 
-  const task = await db.transaction(async (tx) => {
-    const project = await getProjectForUser(tx, user.id, parsed.data.projectId);
-    if (!project) return null;
+  const project = await getProjectForUser(user.id, parsed.data.projectId);
+  if (!project) return { error: "Projet introuvable" };
 
-    const [numberRow] = await tx
-      .update(profile)
-      .set({
-        nextTaskNumber: sql`${profile.nextTaskNumber} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(profile.userId, user.id))
-      .returning({ next: profile.nextTaskNumber });
+  const profile = await getProfile(user.id);
+  if (!profile) throw new Error("Profil introuvable");
 
-    if (!numberRow) throw new Error("Profil introuvable");
+  const supabase = await getSupabaseDb();
+  const order = await nextTaskOrder(
+    user.id,
+    parsed.data.projectId,
+    parsed.data.status,
+  );
+  const { data, error } = await supabase
+    .from("todo_task")
+    .insert({
+      user_id: user.id,
+      project_id: parsed.data.projectId,
+      number: profile.nextTaskNumber,
+      title: parsed.data.title,
+      description: parsed.data.description || null,
+      status: parsed.data.status,
+      order,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
 
-    const order = await nextOrderForStatus(
-      tx,
-      user.id,
-      parsed.data.projectId,
-      parsed.data.status,
-    );
-    const [row] = await tx
-      .insert(todoTask)
-      .values({
-        userId: user.id,
-        projectId: parsed.data.projectId,
-        number: numberRow.next - 1,
-        title: parsed.data.title,
-        description: parsed.data.description || null,
-        status: parsed.data.status,
-        order,
-      })
-      .returning();
-
-    return row;
-  });
-
-  if (!task) return { error: "Projet introuvable" };
+  const { error: updateError } = await supabase
+    .from("profile")
+    .update({
+      next_task_number: profile.nextTaskNumber + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", user.id);
+  if (updateError) throw updateError;
 
   revalidatePath("/todo");
-  return { task: serializeTask(task) };
+  return { task: serializeTask(toTodoTask(data)) };
 }
 
 export async function updateTodoTaskAction(id: string, input: unknown) {
@@ -269,96 +319,93 @@ export async function updateTodoTaskAction(id: string, input: unknown) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
 
-  const task = await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select()
-      .from(todoTask)
-      .where(and(eq(todoTask.id, id), eq(todoTask.userId, user.id)))
-      .limit(1);
+  const supabase = await getSupabaseDb();
+  const { data: existing, error: existingError } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (!existing) return { error: "Tâche introuvable" };
 
-    if (!existing) return null;
+  const task = toTodoTask(existing);
+  const order =
+    task.status === parsed.data.status
+      ? task.order
+      : await nextTaskOrder(user.id, task.projectId, parsed.data.status);
 
-    const order =
-      existing.status === parsed.data.status
-        ? existing.order
-        : await nextOrderForStatus(
-            tx,
-            user.id,
-            existing.projectId,
-            parsed.data.status,
-          );
-
-    const [row] = await tx
-      .update(todoTask)
-      .set({
-        title: parsed.data.title,
-        description: parsed.data.description || null,
-        status: parsed.data.status,
-        order,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(todoTask.id, id), eq(todoTask.userId, user.id)))
-      .returning();
-
-    return row;
-  });
-
-  if (!task) return { error: "Tâche introuvable" };
+  const { data, error } = await supabase
+    .from("todo_task")
+    .update({
+      title: parsed.data.title,
+      description: parsed.data.description || null,
+      status: parsed.data.status,
+      order,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
+  if (error) throw error;
 
   revalidatePath("/todo");
-  return { task: serializeTask(task) };
+  return { task: serializeTask(toTodoTask(data)) };
 }
 
 export async function deleteTodoTaskAction(id: string) {
   const user = await requireUser();
-  const [row] = await db
-    .delete(todoTask)
-    .where(and(eq(todoTask.id, id), eq(todoTask.userId, user.id)))
-    .returning({ id: todoTask.id });
-
-  if (!row) return { error: "Tâche introuvable" };
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("todo_task")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return { error: "Tâche introuvable" };
 
   revalidatePath("/todo");
-  return { id: row.id };
+  return { id: data.id };
 }
 
 export async function advanceTodoTaskAction(id: string) {
   const user = await requireUser();
-  const task = await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select()
-      .from(todoTask)
-      .where(and(eq(todoTask.id, id), eq(todoTask.userId, user.id)))
-      .limit(1);
+  const supabase = await getSupabaseDb();
+  const { data: existing, error: existingError } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (!existing) return { error: "Tâche introuvable" };
 
-    if (!existing) return null;
+  const task = toTodoTask(existing);
+  const nextStatus = nextTodoStatus(task.status);
+  if (!nextStatus) {
+    revalidatePath("/todo");
+    return { task: serializeTask(task) };
+  }
 
-    const nextStatus = nextTodoStatus(existing.status);
-    if (!nextStatus) return existing;
-
-    const order = await nextOrderForStatus(
-      tx,
-      user.id,
-      existing.projectId,
-      nextStatus,
-    );
-    const [row] = await tx
-      .update(todoTask)
-      .set({
-        status: nextStatus,
-        order,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(todoTask.id, id), eq(todoTask.userId, user.id)))
-      .returning();
-
-    return row;
-  });
-
-  if (!task) return { error: "Tâche introuvable" };
+  const order = await nextTaskOrder(user.id, task.projectId, nextStatus);
+  const { data, error } = await supabase
+    .from("todo_task")
+    .update({
+      status: nextStatus,
+      order,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
+  if (error) throw error;
 
   revalidatePath("/todo");
-  return { task: serializeTask(task) };
+  return { task: serializeTask(toTodoTask(data)) };
 }
 
 export async function reorderTodoTasksAction(input: unknown) {
@@ -368,19 +415,27 @@ export async function reorderTodoTasksAction(input: unknown) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
 
-  await db.transaction(async (tx) => {
-    for (const item of parsed.data) {
-      await tx
-        .update(todoTask)
-        .set({
-          status: item.status,
-          order: item.order,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(todoTask.id, item.id), eq(todoTask.userId, user.id)));
-    }
-  });
+  const supabase = await getSupabaseDb();
+  const touchedProjectIds = new Set<string>();
+  for (const item of parsed.data) {
+    const { data, error } = await supabase
+      .from("todo_task")
+      .update({
+        status: item.status,
+        order: item.order,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", item.id)
+      .eq("user_id", user.id)
+      .select("project_id")
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.project_id) touchedProjectIds.add(data.project_id);
+  }
 
   revalidatePath("/todo");
+  for (const projectId of touchedProjectIds) {
+    revalidatePath(`/projects/${projectId}`);
+  }
   return { success: true };
 }

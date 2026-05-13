@@ -3,11 +3,9 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import { client } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { eurosToCents } from "@/lib/money";
+import { getSupabaseDb } from "@/lib/supabase/db";
 
 const baseSchema = z.object({
   name: z.string().min(1, "Nom requis"),
@@ -32,21 +30,24 @@ export async function createClientAction(_prev: unknown, formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
-  const [row] = await db
-    .insert(client)
-    .values({
-      userId: user.id,
+  const supabase = await getSupabaseDb();
+  const { data: row, error } = await supabase
+    .from("client")
+    .insert({
+      user_id: user.id,
       name: data.name,
-      contactName: data.contact_name || null,
+      contact_name: data.contact_name || null,
       email: data.email || null,
       address: data.address || null,
       siret: data.siret || null,
-      vatNumber: data.vat_number || null,
-      defaultRateCents: eurosToCents(data.default_rate),
-      defaultRateType: data.default_rate_type,
+      vat_number: data.vat_number || null,
+      default_rate_cents: eurosToCents(data.default_rate),
+      default_rate_type: data.default_rate_type,
       notes: data.notes || null,
     })
-    .returning({ id: client.id });
+    .select("id")
+    .single();
+  if (error) throw error;
   revalidatePath("/clients");
   redirect(`/clients/${row.id}`);
 }
@@ -58,21 +59,24 @@ export async function updateClientAction(id: string, formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
-  await db
-    .update(client)
-    .set({
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("client")
+    .update({
       name: data.name,
-      contactName: data.contact_name || null,
+      contact_name: data.contact_name || null,
       email: data.email || null,
       address: data.address || null,
       siret: data.siret || null,
-      vatNumber: data.vat_number || null,
-      defaultRateCents: eurosToCents(data.default_rate),
-      defaultRateType: data.default_rate_type,
+      vat_number: data.vat_number || null,
+      default_rate_cents: eurosToCents(data.default_rate),
+      default_rate_type: data.default_rate_type,
       notes: data.notes || null,
-      updatedAt: new Date(),
+      updated_at: new Date().toISOString(),
     })
-    .where(and(eq(client.id, id), eq(client.userId, user.id)));
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) throw error;
   revalidatePath("/clients");
   revalidatePath(`/clients/${id}`);
   return { success: "Client mis à jour." };
@@ -82,10 +86,13 @@ export async function archiveClientAction(
   id: string,
 ): Promise<{ error?: string }> {
   const user = await requireUser();
-  await db
-    .update(client)
-    .set({ archived: true, updatedAt: new Date() })
-    .where(and(eq(client.id, id), eq(client.userId, user.id)));
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("client")
+    .update({ archived: true, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) throw error;
   revalidatePath("/clients");
   return {};
 }
@@ -94,10 +101,13 @@ export async function unarchiveClientAction(
   id: string,
 ): Promise<{ error?: string }> {
   const user = await requireUser();
-  await db
-    .update(client)
-    .set({ archived: false, updatedAt: new Date() })
-    .where(and(eq(client.id, id), eq(client.userId, user.id)));
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("client")
+    .update({ archived: false, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) throw error;
   revalidatePath("/clients");
   return {};
 }

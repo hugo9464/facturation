@@ -2,13 +2,11 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { db } from "@/db";
-import { client, timeEntry } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
+import { getSupabaseDb } from "@/lib/supabase/db";
 
 const createSchema = z.object({
-  client_id: z.string().uuid(),
+  project_id: z.string().uuid(),
   date: z.string(),
   type: z.enum(["DAY", "HALF_DAY", "HOUR", "FORFAIT"]),
   quantity: z.coerce.number().positive(),
@@ -23,22 +21,30 @@ export async function createTimeEntryAction(formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
-  const [c] = await db
-    .select({ id: client.id })
-    .from(client)
-    .where(and(eq(client.id, data.client_id), eq(client.userId, user.id)))
-    .limit(1);
-  if (!c) return { error: "Client introuvable" };
+  const supabase = await getSupabaseDb();
+  const { data: project, error: projectError } = await supabase
+    .from("todo_project")
+    .select("id, client_id")
+    .eq("id", data.project_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (projectError) throw projectError;
+  if (!project) return { error: "Projet introuvable" };
+  if (!project.client_id) {
+    return { error: "Associe ce projet à un client avant de logger du temps." };
+  }
 
-  await db.insert(timeEntry).values({
-    userId: user.id,
-    clientId: data.client_id,
+  const { error } = await supabase.from("time_entry").insert({
+    user_id: user.id,
+    client_id: project.client_id,
+    project_id: data.project_id,
     date: data.date,
     type: data.type,
     quantity: data.quantity.toString(),
-    rateCents: data.rate_cents,
+    rate_cents: data.rate_cents,
     description: data.description?.trim() || null,
   });
+  if (error) throw error;
   revalidatePath("/", "layout");
   return { success: true };
 }
@@ -50,52 +56,71 @@ export async function updateTimeEntryAction(id: string, formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
+  const supabase = await getSupabaseDb();
 
-  const [existing] = await db
-    .select({ id: timeEntry.id, invoiceId: timeEntry.invoiceId })
-    .from(timeEntry)
-    .where(and(eq(timeEntry.id, id), eq(timeEntry.userId, user.id)))
-    .limit(1);
+  const { data: existing, error: existingError } = await supabase
+    .from("time_entry")
+    .select("id, invoice_id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existingError) throw existingError;
   if (!existing) return { error: "Saisie introuvable" };
-  if (existing.invoiceId) {
+  if (existing.invoice_id) {
     return { error: "Saisie déjà facturée — modification impossible." };
   }
 
-  const [c] = await db
-    .select({ id: client.id })
-    .from(client)
-    .where(and(eq(client.id, data.client_id), eq(client.userId, user.id)))
-    .limit(1);
-  if (!c) return { error: "Client introuvable" };
+  const { data: project, error: projectError } = await supabase
+    .from("todo_project")
+    .select("id, client_id")
+    .eq("id", data.project_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (projectError) throw projectError;
+  if (!project) return { error: "Projet introuvable" };
+  if (!project.client_id) {
+    return { error: "Associe ce projet à un client avant de logger du temps." };
+  }
 
-  await db
-    .update(timeEntry)
-    .set({
-      clientId: data.client_id,
+  const { error } = await supabase
+    .from("time_entry")
+    .update({
+      client_id: project.client_id,
+      project_id: data.project_id,
       date: data.date,
       type: data.type,
       quantity: data.quantity.toString(),
-      rateCents: data.rate_cents,
+      rate_cents: data.rate_cents,
       description: data.description?.trim() || null,
-      updatedAt: new Date(),
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(timeEntry.id, id));
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) throw error;
   revalidatePath("/", "layout");
   return { success: true };
 }
 
 export async function deleteTimeEntryAction(id: string) {
   const user = await requireUser();
-  const [entry] = await db
-    .select({ id: timeEntry.id, invoiceId: timeEntry.invoiceId })
-    .from(timeEntry)
-    .where(and(eq(timeEntry.id, id), eq(timeEntry.userId, user.id)))
-    .limit(1);
+  const supabase = await getSupabaseDb();
+  const { data: entry, error: entryError } = await supabase
+    .from("time_entry")
+    .select("id, invoice_id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (entryError) throw entryError;
   if (!entry) return { error: "Saisie introuvable" };
-  if (entry.invoiceId) {
+  if (entry.invoice_id) {
     return { error: "Saisie déjà facturée — annule la facture d'abord." };
   }
-  await db.delete(timeEntry).where(eq(timeEntry.id, id));
+  const { error } = await supabase
+    .from("time_entry")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) throw error;
   revalidatePath("/", "layout");
   return { success: true };
 }

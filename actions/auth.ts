@@ -1,12 +1,10 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { db } from "@/db";
-import { profile } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { count } from "drizzle-orm";
 import { z } from "zod";
+import { getSupabaseDb } from "@/lib/supabase/db";
 
 const credentialsSchema = z.object({
   email: z.string().email("Email invalide"),
@@ -37,10 +35,12 @@ export async function signupAction(_prev: unknown, formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
 
-  const [{ value: existingProfiles }] = await db
-    .select({ value: count() })
-    .from(profile);
-  if (existingProfiles > 0) {
+  const db = await getSupabaseDb();
+  const { count: existingProfiles, error: countError } = await db
+    .from("profile")
+    .select("user_id", { count: "exact", head: true });
+  if (countError) throw countError;
+  if ((existingProfiles ?? 0) > 0) {
     return {
       error:
         "Inscription verrouillée : un compte existe déjà sur cette instance.",

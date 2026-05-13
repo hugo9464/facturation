@@ -3,16 +3,6 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import {
-  client as clientTable,
-  invoice,
-  invoiceLine,
-  profile,
-  quote,
-  quoteLine,
-} from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import {
   buildLegalMention,
@@ -20,33 +10,79 @@ import {
   buildQuoteLegalMention,
 } from "@/lib/legal";
 import { addDaysISO, todayISO } from "@/lib/dates";
-import { allocateInvoiceNumber, allocateQuoteNumber } from "@/lib/invoice-numbering";
+import { allocateQuoteNumber } from "@/lib/invoice-numbering";
 import { eurosToCents } from "@/lib/money";
 import {
   formatMissingFieldsError,
   getClientMissingFields,
   getProfileMissingFields,
 } from "@/lib/billing-readiness";
+import {
+  getProfile,
+  getSupabaseDb,
+  toClient,
+  toQuote,
+  toQuoteLine,
+} from "@/lib/supabase/db";
 
 const QUOTE_VALIDITY_DAYS = 30;
 
-export async function createDraftQuoteAction(input: { clientId: string }) {
+async function getQuoteForUser(quoteId: string, userId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("quote")
+    .select("*")
+    .eq("id", quoteId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toQuote(data) : null;
+}
+
+async function getQuoteLines(quoteId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("quote_line")
+    .select("*")
+    .eq("quote_id", quoteId)
+    .order("order", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(toQuoteLine);
+}
+
+async function recomputeQuoteTotal(quoteId: string) {
+  const lines = await getQuoteLines(quoteId);
+  const total = lines.reduce((sum, line) => sum + line.totalCents, 0);
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote")
+    .update({
+      subtotal_cents: total,
+      total_cents: total,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", quoteId);
+  if (error) throw error;
+}
+
+export async function createDraftQuoteAction(input: { projectId: string }) {
   const user = await requireUser();
-  if (!input.clientId) return { error: "Client manquant" };
+  if (!input.projectId) return { error: "Projet manquant" };
 
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const profileRow = await getProfile(user.id);
+  const supabase = await getSupabaseDb();
+  const { data: projectRow, error: projectError } = await supabase
+    .from("todo_project")
+    .select("client:client_id(*)")
+    .eq("id", input.projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (projectError) throw projectError;
 
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(
-      and(eq(clientTable.id, input.clientId), eq(clientTable.userId, user.id)),
-    )
-    .limit(1);
+  const clientRow = Array.isArray(projectRow?.client)
+    ? projectRow.client[0]
+    : projectRow?.client;
+  const c = clientRow ? toClient(clientRow) : null;
   if (!c) return { error: "Client introuvable" };
 
   const profileMissing = getProfileMissingFields(profileRow);
@@ -65,26 +101,29 @@ export async function createDraftQuoteAction(input: { clientId: string }) {
   const issueDate = todayISO();
   const validUntil = addDaysISO(issueDate, QUOTE_VALIDITY_DAYS);
 
-  const [q] = await db
-    .insert(quote)
-    .values({
-      userId: user.id,
-      clientId: c.id,
+  const { data, error } = await supabase
+    .from("quote")
+    .insert({
+      user_id: user.id,
+      client_id: c.id,
+      project_id: input.projectId,
       number: null,
-      issueDate,
-      validUntil,
+      issue_date: issueDate,
+      valid_until: validUntil,
       status: "DRAFT",
-      subtotalCents: 0,
-      totalCents: 0,
+      subtotal_cents: 0,
+      total_cents: 0,
       currency: "EUR",
-      legalMention: buildQuoteLegalMention(profileRow),
-      paymentTermsText: buildPaymentTermsText(profileRow),
+      legal_mention: buildQuoteLegalMention(profileRow),
+      payment_terms_text: buildPaymentTermsText(profileRow),
       notes: null,
     })
-    .returning({ id: quote.id });
+    .select("id")
+    .single();
+  if (error) throw error;
 
   revalidatePath("/quotes");
-  redirect(`/quotes/${q.id}`);
+  redirect(`/quotes/${data.id}`);
 }
 
 const lineSchema = z.object({
@@ -100,11 +139,7 @@ export async function addQuoteLineAction(quoteId: string, formData: FormData) {
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
-  const [q] = await db
-    .select({ id: quote.id, status: quote.status })
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status === "ACCEPTED" || q.status === "REJECTED") {
     return { error: "Devis verrouillé — modifications impossibles." };
@@ -112,62 +147,45 @@ export async function addQuoteLineAction(quoteId: string, formData: FormData) {
 
   const unitPriceCents = eurosToCents(parsed.data.unit_price);
   const totalCents = Math.round(parsed.data.quantity * unitPriceCents);
-
-  const existing = await db
-    .select({ order: quoteLine.order })
-    .from(quoteLine)
-    .where(eq(quoteLine.quoteId, quoteId));
+  const existing = await getQuoteLines(quoteId);
   const maxOrder = existing.reduce((m, l) => Math.max(m, l.order), -1);
 
-  await db.insert(quoteLine).values({
-    quoteId,
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase.from("quote_line").insert({
+    quote_id: quoteId,
     order: maxOrder + 1,
     description: parsed.data.description,
     quantity: parsed.data.quantity.toString(),
-    unitType: parsed.data.unit_type,
-    unitPriceCents,
-    totalCents,
+    unit_type: parsed.data.unit_type,
+    unit_price_cents: unitPriceCents,
+    total_cents: totalCents,
   });
+  if (error) throw error;
 
   await recomputeQuoteTotal(quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   return { success: "Ligne ajoutée." };
 }
 
-export async function deleteQuoteLineAction(
-  quoteId: string,
-  lineId: string,
-) {
+export async function deleteQuoteLineAction(quoteId: string, lineId: string) {
   const user = await requireUser();
-  const [q] = await db
-    .select({ id: quote.id, status: quote.status })
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status === "ACCEPTED" || q.status === "REJECTED") {
     return { error: "Devis verrouillé" };
   }
-  await db
-    .delete(quoteLine)
-    .where(and(eq(quoteLine.id, lineId), eq(quoteLine.quoteId, quoteId)));
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote_line")
+    .delete()
+    .eq("id", lineId)
+    .eq("quote_id", quoteId);
+  if (error) throw error;
+
   await recomputeQuoteTotal(quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   return { success: true };
-}
-
-async function recomputeQuoteTotal(quoteId: string) {
-  const [r] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${quoteLine.totalCents}), 0)`,
-    })
-    .from(quoteLine)
-    .where(eq(quoteLine.quoteId, quoteId));
-  const total = Number(r.total);
-  await db
-    .update(quote)
-    .set({ subtotalCents: total, totalCents: total, updatedAt: new Date() })
-    .where(eq(quote.id, quoteId));
 }
 
 const detailsSchema = z.object({
@@ -185,130 +203,129 @@ export async function updateQuoteDetailsAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
-  const [q] = await db
-    .select({ id: quote.id, status: quote.status })
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status === "ACCEPTED" || q.status === "REJECTED") {
     return { error: "Devis verrouillé" };
   }
-  await db
-    .update(quote)
-    .set({
-      issueDate: parsed.data.issue_date,
-      validUntil: parsed.data.valid_until,
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote")
+    .update({
+      issue_date: parsed.data.issue_date,
+      valid_until: parsed.data.valid_until,
       notes: parsed.data.notes || null,
-      updatedAt: new Date(),
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(quote.id, quoteId));
+    .eq("id", quoteId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath(`/quotes/${quoteId}`);
   return { success: "Mis à jour." };
 }
 
 export async function sendQuoteAction(quoteId: string) {
   const user = await requireUser();
-  const [q] = await db
-    .select()
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status !== "DRAFT") return { error: "Statut invalide" };
 
-  const lines = await db
-    .select({ id: quoteLine.id })
-    .from(quoteLine)
-    .where(eq(quoteLine.quoteId, quoteId));
+  const lines = await getQuoteLines(quoteId);
   if (lines.length === 0) {
     return { error: "Ajoute au moins une ligne avant d'envoyer." };
   }
 
   const number = q.number ?? (await allocateQuoteNumber(user.id, new Date(q.issueDate)));
-
-  await db
-    .update(quote)
-    .set({
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote")
+    .update({
       number,
       status: "SENT",
-      sentAt: new Date(),
-      updatedAt: new Date(),
+      sent_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(quote.id, quoteId));
+    .eq("id", quoteId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath("/", "layout");
   return { success: "Devis envoyé." };
 }
 
 export async function acceptQuoteAction(quoteId: string) {
   const user = await requireUser();
-  const [q] = await db
-    .select({ status: quote.status })
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status !== "SENT") {
     return { error: "Le devis doit être au statut 'Envoyé' pour être accepté." };
   }
-  await db
-    .update(quote)
-    .set({
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote")
+    .update({
       status: "ACCEPTED",
-      acceptedAt: new Date(),
-      updatedAt: new Date(),
+      accepted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(quote.id, quoteId));
+    .eq("id", quoteId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath("/", "layout");
   return { success: "Devis accepté." };
 }
 
 export async function rejectQuoteAction(quoteId: string) {
   const user = await requireUser();
-  const [q] = await db
-    .select({ status: quote.status })
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status !== "SENT") {
     return { error: "Le devis doit être au statut 'Envoyé' pour être refusé." };
   }
-  await db
-    .update(quote)
-    .set({
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote")
+    .update({
       status: "REJECTED",
-      rejectedAt: new Date(),
-      updatedAt: new Date(),
+      rejected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(quote.id, quoteId));
+    .eq("id", quoteId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath("/", "layout");
   return { success: "Devis refusé." };
 }
 
 export async function deleteQuoteAction(quoteId: string) {
   const user = await requireUser();
-  const [q] = await db
-    .select({ status: quote.status })
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status !== "DRAFT") {
     return { error: "Seuls les brouillons peuvent être supprimés." };
   }
-  await db.delete(quote).where(eq(quote.id, quoteId));
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("quote")
+    .delete()
+    .eq("id", quoteId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath("/quotes");
   redirect("/quotes");
 }
 
 export async function convertQuoteToInvoiceAction(quoteId: string) {
   const user = await requireUser();
-  const [q] = await db
-    .select()
-    .from(quote)
-    .where(and(eq(quote.id, quoteId), eq(quote.userId, user.id)))
-    .limit(1);
+  const q = await getQuoteForUser(quoteId, user.id);
   if (!q) return { error: "Devis introuvable" };
   if (q.status !== "ACCEPTED") {
     return { error: "Seul un devis accepté peut être converti en facture." };
@@ -316,17 +333,20 @@ export async function convertQuoteToInvoiceAction(quoteId: string) {
   if (q.convertedInvoiceId) {
     return { error: "Devis déjà converti en facture." };
   }
+  if (!q.projectId) {
+    return { error: "Associe ce devis à un projet avant conversion." };
+  }
 
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(eq(clientTable.id, q.clientId))
-    .limit(1);
+  const profileRow = await getProfile(user.id);
+  const supabase = await getSupabaseDb();
+  const { data: clientRow, error: clientError } = await supabase
+    .from("client")
+    .select("*")
+    .eq("id", q.clientId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (clientError) throw clientError;
+  const c = clientRow ? toClient(clientRow) : null;
   if (!profileRow || !c) return { error: "Données manquantes" };
 
   const profileMissing = getProfileMissingFields(profileRow);
@@ -341,54 +361,56 @@ export async function convertQuoteToInvoiceAction(quoteId: string) {
     };
   }
 
-  const lines = await db
-    .select()
-    .from(quoteLine)
-    .where(eq(quoteLine.quoteId, quoteId))
-    .orderBy(quoteLine.order);
-
+  const lines = await getQuoteLines(quoteId);
   const issueDate = todayISO();
   const dueDate = addDaysISO(issueDate, profileRow.defaultPaymentTermsDays);
 
-  const [inv] = await db
-    .insert(invoice)
-    .values({
-      userId: user.id,
-      clientId: c.id,
+  const { data: inv, error: invoiceError } = await supabase
+    .from("invoice")
+    .insert({
+      user_id: user.id,
+      client_id: c.id,
+      project_id: q.projectId,
       number: null,
-      issueDate,
-      dueDate,
+      issue_date: issueDate,
+      due_date: dueDate,
       status: "DRAFT",
-      subtotalCents: q.totalCents,
-      totalCents: q.totalCents,
+      subtotal_cents: q.totalCents,
+      total_cents: q.totalCents,
       currency: q.currency,
-      legalMention: buildLegalMention(profileRow),
-      paymentTermsText: buildPaymentTermsText(profileRow),
+      legal_mention: buildLegalMention(profileRow),
+      payment_terms_text: buildPaymentTermsText(profileRow),
       notes: q.notes,
     })
-    .returning({ id: invoice.id });
+    .select("id")
+    .single();
+  if (invoiceError) throw invoiceError;
 
   if (lines.length > 0) {
-    await db.insert(invoiceLine).values(
+    const { error } = await supabase.from("invoice_line").insert(
       lines.map((l, i) => ({
-        invoiceId: inv.id,
+        invoice_id: inv.id,
         order: i,
         description: l.description,
         quantity: l.quantity,
-        unitType: l.unitType,
-        unitPriceCents: l.unitPriceCents,
-        totalCents: l.totalCents,
+        unit_type: l.unitType,
+        unit_price_cents: l.unitPriceCents,
+        total_cents: l.totalCents,
+        time_entry_ids: [],
       })),
     );
+    if (error) throw error;
   }
 
-  await db
-    .update(quote)
-    .set({
-      convertedInvoiceId: inv.id,
-      updatedAt: new Date(),
+  const { error: updateError } = await supabase
+    .from("quote")
+    .update({
+      converted_invoice_id: inv.id,
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(quote.id, quoteId));
+    .eq("id", quoteId)
+    .eq("user_id", user.id);
+  if (updateError) throw updateError;
 
   revalidatePath("/", "layout");
   redirect(`/invoices/${inv.id}`);

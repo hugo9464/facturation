@@ -15,20 +15,24 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { Button, ButtonLink, buttonVariants } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import {
   createTimeEntryAction,
   updateTimeEntryAction,
 } from "@/actions/time-entries";
 import { todayISO } from "@/lib/dates";
-import type { Client, RateType, TimeEntry } from "@/db/schema";
+import type { Client, RateType, TimeEntry, TodoProject } from "@/db/schema";
+import { cn } from "@/lib/utils";
+
+export type TimeEntryProjectOption = TodoProject & {
+  client: Pick<Client, "id" | "name" | "defaultRateCents" | "defaultRateType">;
+};
 
 const TYPE_LABELS: Record<RateType, string> = {
   DAY: "Jour",
@@ -46,13 +50,13 @@ const DEFAULT_QTY: Record<RateType, string> = {
 
 export function TimeEntryDialog({
   children,
-  clients,
+  projects,
   entry,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
 }: {
   children?: React.ReactNode;
-  clients: Client[];
+  projects: TimeEntryProjectOption[];
   entry?: TimeEntry;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -63,16 +67,21 @@ export function TimeEntryDialog({
   const [pending, startTransition] = useTransition();
 
   const isEdit = Boolean(entry);
-  const initialClientId = entry?.clientId ?? clients[0]?.id ?? "";
-  const initialType = entry?.type ?? clients[0]?.defaultRateType ?? "DAY";
+  const initialProject =
+    projects.find((project) => project.id === entry?.projectId) ??
+    projects.find((project) => project.clientId === entry?.clientId) ??
+    projects[0];
+  const initialProjectId = initialProject?.id ?? "";
+  const initialType = entry?.type ?? initialProject?.client.defaultRateType ?? "DAY";
   const initialQuantity = entry
     ? entry.quantity
     : DEFAULT_QTY[initialType];
-  const initialRateCents = entry?.rateCents ?? clients[0]?.defaultRateCents ?? 0;
+  const initialRateCents =
+    entry?.rateCents ?? initialProject?.client.defaultRateCents ?? 0;
   const entryKey = entry?.id ?? "new";
 
   const [loadedEntryKey, setLoadedEntryKey] = useState(entryKey);
-  const [clientId, setClientId] = useState(initialClientId);
+  const [projectId, setProjectId] = useState(initialProjectId);
   const [type, setType] = useState<RateType>(initialType);
   const [quantity, setQuantity] = useState(initialQuantity);
   const [rateCentsOverride, setRateCentsOverride] = useState<number | null>(
@@ -81,23 +90,24 @@ export function TimeEntryDialog({
 
   if (loadedEntryKey !== entryKey) {
     setLoadedEntryKey(entryKey);
-    setClientId(initialClientId);
+    setProjectId(initialProjectId);
     setType(initialType);
     setQuantity(initialQuantity);
     setRateCentsOverride(isEdit ? initialRateCents : null);
   }
 
-  const selectedClient = clients.find((c) => c.id === clientId);
+  const selectedProject = projects.find((project) => project.id === projectId);
+  const selectedClient = selectedProject?.client;
   const rateCents =
     rateCentsOverride ?? selectedClient?.defaultRateCents ?? 0;
 
-  function onClientChange(id: string | null) {
+  function onProjectChange(id: string | null) {
     if (!id) return;
-    setClientId(id);
-    const c = clients.find((c) => c.id === id);
-    if (c && !isEdit) {
-      setType(c.defaultRateType);
-      setQuantity(DEFAULT_QTY[c.defaultRateType]);
+    setProjectId(id);
+    const project = projects.find((item) => item.id === id);
+    if (project && !isEdit) {
+      setType(project.client.defaultRateType);
+      setQuantity(DEFAULT_QTY[project.client.defaultRateType]);
       setRateCentsOverride(null);
     }
   }
@@ -110,21 +120,44 @@ export function TimeEntryDialog({
 
   const trigger =
     children !== undefined ? (children as React.ReactElement) : null;
+  const triggerProps =
+    trigger && "props" in trigger
+      ? (trigger.props as {
+          children?: React.ReactNode;
+          className?: string;
+          variant?: React.ComponentProps<typeof Button>["variant"];
+          size?: React.ComponentProps<typeof Button>["size"];
+        })
+      : null;
+  const triggerNode = triggerProps ? (
+    <DialogTrigger
+      className={cn(
+        buttonVariants({
+          variant: triggerProps.variant ?? "default",
+          size: triggerProps.size ?? "default",
+          className: triggerProps.className,
+        }),
+      )}
+    >
+      {triggerProps.children}
+    </DialogTrigger>
+  ) : null;
 
-  if (clients.length === 0) {
+  if (projects.length === 0) {
     return (
       <Dialog open={open} onOpenChange={setOpen}>
-        {trigger && <DialogTrigger render={trigger} />}
+        {triggerNode}
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Aucun client</DialogTitle>
+            <DialogTitle>Aucun projet</DialogTitle>
             <DialogDescription>
-              Crée d&apos;abord un client pour pouvoir logger du temps.
+              Crée d&apos;abord un projet rattaché à un client pour logger du
+              temps.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <ButtonLink href="/clients/new" onClick={() => setOpen(false)}>
-              Créer un client
+            <ButtonLink href="/projects" onClick={() => setOpen(false)}>
+              Créer un projet
             </ButtonLink>
           </DialogFooter>
         </DialogContent>
@@ -134,7 +167,7 @@ export function TimeEntryDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      {trigger && <DialogTrigger render={trigger} />}
+      {triggerNode}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
@@ -163,20 +196,24 @@ export function TimeEntryDialog({
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="client_id">Client</Label>
-            <Select value={clientId} onValueChange={onClientChange}>
-              <SelectTrigger id="client_id" className="w-full">
-                <SelectValue />
+            <Label htmlFor="project_id">Projet</Label>
+            <Select value={projectId} onValueChange={onProjectChange}>
+              <SelectTrigger id="project_id" className="w-full">
+                <span className="truncate">
+                  {selectedProject
+                    ? `${selectedProject.name} · ${selectedProject.client.name}`
+                    : "Projet"}
+                </span>
               </SelectTrigger>
               <SelectContent>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name} · {project.client.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <input type="hidden" name="client_id" value={clientId} />
+            <input type="hidden" name="project_id" value={projectId} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -194,7 +231,7 @@ export function TimeEntryDialog({
               <Label htmlFor="type">Type</Label>
               <Select value={type} onValueChange={onTypeChange}>
                 <SelectTrigger id="type" className="w-full">
-                  <SelectValue />
+                  <span className="truncate">{TYPE_LABELS[type]}</span>
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(TYPE_LABELS).map(([k, v]) => (

@@ -36,9 +36,14 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 700,
     color: "#000",
-    marginBottom: 4,
+    marginBottom: 8,
   },
-  invoiceNumber: { fontSize: 11, color: "#444", marginBottom: 10 },
+  invoiceNumber: {
+    fontSize: 10,
+    color: "#444",
+    marginBottom: 16,
+    lineHeight: 1.35,
+  },
   invoiceMetaRow: { fontSize: 9, marginBottom: 2 },
   invoiceMetaLabel: { color: "#777" },
   clientBlock: {
@@ -165,9 +170,10 @@ export function InvoicePDF({
           </View>
           <View style={styles.invoiceBlock}>
             <Text style={styles.invoiceTitle}>FACTURE</Text>
-            <Text style={styles.invoiceNumber}>
-              N° {invoice.number ?? "BROUILLON"}
-            </Text>
+            <View style={styles.invoiceNumber}>
+              <Text>N°</Text>
+              <Text>{invoice.number ?? "BROUILLON"}</Text>
+            </View>
             <View style={styles.invoiceMetaRow}>
               <Text>
                 <Text style={styles.invoiceMetaLabel}>Émise le </Text>

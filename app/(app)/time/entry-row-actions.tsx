@@ -4,16 +4,19 @@ import { useState, useTransition } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { TimeEntryDialog } from "@/components/time-entry-dialog";
+import {
+  TimeEntryDialog,
+  type TimeEntryProjectOption,
+} from "@/components/time-entry-dialog";
 import { deleteTimeEntryAction } from "@/actions/time-entries";
-import type { Client, TimeEntry } from "@/db/schema";
+import type { TimeEntry } from "@/db/schema";
 
 export function EntryRowActions({
   entry,
-  clients,
+  projects,
 }: {
   entry: TimeEntry;
-  clients: Client[];
+  projects: TimeEntryProjectOption[];
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -46,7 +49,7 @@ export function EntryRowActions({
         <Trash2 className="size-3.5" />
       </Button>
       <TimeEntryDialog
-        clients={clients}
+        projects={projects}
         entry={entry}
         open={editOpen}
         onOpenChange={setEditOpen}

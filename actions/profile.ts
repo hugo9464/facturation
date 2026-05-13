@@ -3,10 +3,8 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import { profile } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
+import { getSupabaseDb } from "@/lib/supabase/db";
 
 const profileSchema = z.object({
   business_name: z.string().min(1, "Nom requis"),
@@ -37,48 +35,52 @@ export async function upsertProfileAction(_prev: unknown, formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
-  const existing = await db
-    .select({ userId: profile.userId })
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const supabase = await getSupabaseDb();
+  const { data: existing, error: existingError } = await supabase
+    .from("profile")
+    .select("user_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existingError) throw existingError;
 
-  if (existing.length === 0) {
-    await db.insert(profile).values({
-      userId: user.id,
-      businessName: data.business_name,
+  if (!existing) {
+    const { error } = await supabase.from("profile").insert({
+      user_id: user.id,
+      business_name: data.business_name,
       siret: data.siret.replace(/\s/g, ""),
       address: data.address,
       email: data.email,
       phone: data.phone || null,
       iban: data.iban || null,
       bic: data.bic || null,
-      defaultPaymentTermsDays: data.default_payment_terms_days,
-      plafondType: data.plafond_type,
-      legalMentionExtra: data.legal_mention_extra || null,
-      rcsExempt: data.rcs_exempt ?? true,
+      default_payment_terms_days: data.default_payment_terms_days,
+      plafond_type: data.plafond_type,
+      legal_mention_extra: data.legal_mention_extra || null,
+      rcs_exempt: data.rcs_exempt ?? true,
     });
+    if (error) throw error;
   } else {
-    await db
-      .update(profile)
-      .set({
-        businessName: data.business_name,
+    const { error } = await supabase
+      .from("profile")
+      .update({
+        business_name: data.business_name,
         siret: data.siret.replace(/\s/g, ""),
         address: data.address,
         email: data.email,
         phone: data.phone || null,
         iban: data.iban || null,
         bic: data.bic || null,
-        defaultPaymentTermsDays: data.default_payment_terms_days,
-        plafondType: data.plafond_type,
-        legalMentionExtra: data.legal_mention_extra || null,
-        rcsExempt: data.rcs_exempt ?? true,
-        updatedAt: new Date(),
+        default_payment_terms_days: data.default_payment_terms_days,
+        plafond_type: data.plafond_type,
+        legal_mention_extra: data.legal_mention_extra || null,
+        rcs_exempt: data.rcs_exempt ?? true,
+        updated_at: new Date().toISOString(),
       })
-      .where(eq(profile.userId, user.id));
+      .eq("user_id", user.id);
+    if (error) throw error;
   }
   revalidatePath("/", "layout");
-  if (existing.length === 0) {
+  if (!existing) {
     redirect("/");
   }
   return { success: "Paramètres enregistrés." };

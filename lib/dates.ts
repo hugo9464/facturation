@@ -11,6 +11,11 @@ export function formatDateLong(date: Date | string): string {
   return format(d, "d MMMM yyyy", { locale: fr });
 }
 
+export function formatDateTime(date: Date | string): string {
+  const d = typeof date === "string" ? parseISO(date) : date;
+  return format(d, "dd/MM/yyyy HH:mm", { locale: fr });
+}
+
 export function formatMonthYear(date: Date | string): string {
   const d = typeof date === "string" ? parseISO(date) : date;
   return format(d, "MMMM yyyy", { locale: fr });

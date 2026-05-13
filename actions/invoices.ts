@@ -3,15 +3,6 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import {
-  client as clientTable,
-  invoice,
-  invoiceLine,
-  profile,
-  timeEntry,
-} from "@/db/schema";
-import { and, eq, inArray, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { buildLegalMention, buildPaymentTermsText } from "@/lib/legal";
 import {
@@ -21,8 +12,17 @@ import {
 } from "@/lib/billing-readiness";
 import { addDaysISO, todayISO } from "@/lib/dates";
 import { allocateInvoiceNumber } from "@/lib/invoice-numbering";
+import { sendInvoiceEmail } from "@/lib/email";
 import { eurosToCents } from "@/lib/money";
 import { renderInvoicePDFToBuffer } from "@/lib/pdf-render";
+import {
+  getProfile,
+  getSupabaseDb,
+  toClient,
+  toInvoice,
+  toInvoiceLine,
+  toTimeEntry,
+} from "@/lib/supabase/db";
 import { createClient as createSupabase } from "@/lib/supabase/server";
 
 const draftLineSchema = z.object({
@@ -35,7 +35,7 @@ const draftLineSchema = z.object({
 
 const draftSchema = z
   .object({
-    clientId: z.string().uuid(),
+    projectId: z.string().uuid(),
     periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     lines: z.array(draftLineSchema).min(1, "Ajoute au moins une ligne"),
@@ -45,8 +45,46 @@ const draftSchema = z
     path: ["periodEnd"],
   });
 
+async function getInvoiceForUser(invoiceId: string, userId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("invoice")
+    .select("*")
+    .eq("id", invoiceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toInvoice(data) : null;
+}
+
+async function getInvoiceLines(invoiceId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("invoice_line")
+    .select("*")
+    .eq("invoice_id", invoiceId)
+    .order("order", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(toInvoiceLine);
+}
+
+async function recomputeInvoiceTotal(invoiceId: string) {
+  const lines = await getInvoiceLines(invoiceId);
+  const total = lines.reduce((sum, line) => sum + line.totalCents, 0);
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("invoice")
+    .update({
+      subtotal_cents: total,
+      total_cents: total,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", invoiceId);
+  if (error) throw error;
+}
+
 export async function createDraftInvoiceAction(input: {
-  clientId: string;
+  projectId: string;
   periodStart: string;
   periodEnd: string;
   lines: Array<{
@@ -63,20 +101,21 @@ export async function createDraftInvoiceAction(input: {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const data = parsed.data;
+  const supabase = await getSupabaseDb();
 
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const profileRow = await getProfile(user.id);
+  const { data: projectRow, error: projectError } = await supabase
+    .from("todo_project")
+    .select("client:client_id(*)")
+    .eq("id", data.projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (projectError) throw projectError;
 
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(
-      and(eq(clientTable.id, data.clientId), eq(clientTable.userId, user.id)),
-    )
-    .limit(1);
+  const clientRow = Array.isArray(projectRow?.client)
+    ? projectRow.client[0]
+    : projectRow?.client;
+  const c = clientRow ? toClient(clientRow) : null;
   if (!c) return { error: "Client introuvable" };
 
   const profileMissing = getProfileMissingFields(profileRow);
@@ -90,26 +129,23 @@ export async function createDraftInvoiceAction(input: {
       }),
     };
   }
-  if (!profileRow) {
-    return { error: "Paramètres d'entreprise manquants." };
-  }
+  if (!profileRow) return { error: "Paramètres d'entreprise manquants." };
 
   const allRequestedTimeEntryIds = data.lines.flatMap((line) => line.timeEntryIds);
   const requestedTimeEntryIds = Array.from(new Set(allRequestedTimeEntryIds));
   if (requestedTimeEntryIds.length !== allRequestedTimeEntryIds.length) {
     return { error: "Une saisie ne peut être facturée qu'une seule fois." };
   }
+
   if (requestedTimeEntryIds.length > 0) {
-    const entries = await db
-      .select()
-      .from(timeEntry)
-      .where(
-        and(
-          inArray(timeEntry.id, requestedTimeEntryIds),
-          eq(timeEntry.userId, user.id),
-          eq(timeEntry.clientId, data.clientId),
-        ),
-      );
+    const { data: rows, error } = await supabase
+      .from("time_entry")
+      .select("*")
+      .in("id", requestedTimeEntryIds)
+      .eq("user_id", user.id)
+      .eq("project_id", data.projectId);
+    if (error) throw error;
+    const entries = (rows ?? []).map(toTimeEntry);
     const validEntryIds = new Set(
       entries
         .filter(
@@ -122,8 +158,7 @@ export async function createDraftInvoiceAction(input: {
     );
     if (validEntryIds.size !== requestedTimeEntryIds.length) {
       return {
-        error:
-          "Certaines saisies ne sont plus facturables pour cette période.",
+        error: "Certaines saisies ne sont plus facturables pour cette période.",
       };
     }
   }
@@ -144,43 +179,43 @@ export async function createDraftInvoiceAction(input: {
   const issueDate = todayISO();
   const dueDate = addDaysISO(issueDate, profileRow.defaultPaymentTermsDays);
 
-  const inv = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(invoice)
-      .values({
-        userId: user.id,
-        clientId: c.id,
-        number: null,
-        issueDate,
-        dueDate,
-        status: "DRAFT",
-        subtotalCents,
-        totalCents: subtotalCents,
-        currency: "EUR",
-        legalMention: buildLegalMention(profileRow),
-        paymentTermsText: buildPaymentTermsText(profileRow),
-        notes: null,
-      })
-      .returning({ id: invoice.id });
+  const { data: created, error: createError } = await supabase
+    .from("invoice")
+    .insert({
+      user_id: user.id,
+      client_id: c.id,
+      project_id: data.projectId,
+      number: null,
+      issue_date: issueDate,
+      due_date: dueDate,
+      status: "DRAFT",
+      subtotal_cents: subtotalCents,
+      total_cents: subtotalCents,
+      currency: "EUR",
+      legal_mention: buildLegalMention(profileRow),
+      payment_terms_text: buildPaymentTermsText(profileRow),
+      notes: null,
+    })
+    .select("id")
+    .single();
+  if (createError) throw createError;
 
-    await tx.insert(invoiceLine).values(
-      lines.map((l, i) => ({
-        invoiceId: created.id,
-        order: i,
-        description: l.description,
-        quantity: l.quantity.toString(),
-        unitType: l.unitType,
-        unitPriceCents: l.unitPriceCents,
-        totalCents: l.totalCents,
-        timeEntryIds: l.timeEntryIds,
-      })),
-    );
-
-    return created;
-  });
+  const { error: linesError } = await supabase.from("invoice_line").insert(
+    lines.map((l, i) => ({
+      invoice_id: created.id,
+      order: i,
+      description: l.description,
+      quantity: l.quantity.toString(),
+      unit_type: l.unitType,
+      unit_price_cents: l.unitPriceCents,
+      total_cents: l.totalCents,
+      time_entry_ids: l.timeEntryIds,
+    })),
+  );
+  if (linesError) throw linesError;
 
   revalidatePath("/invoices");
-  redirect(`/invoices/${inv.id}`);
+  redirect(`/invoices/${created.id}`);
 }
 
 const lineSchema = z.object({
@@ -199,11 +234,7 @@ export async function addInvoiceLineAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
-  const [inv] = await db
-    .select({ id: invoice.id, status: invoice.status })
-    .from(invoice)
-    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, user.id)))
-    .limit(1);
+  const inv = await getInvoiceForUser(invoiceId, user.id);
   if (!inv) return { error: "Facture introuvable" };
   if (inv.status !== "DRAFT") {
     return { error: "Facture déjà émise — modification impossible." };
@@ -211,22 +242,21 @@ export async function addInvoiceLineAction(
 
   const unitPriceCents = eurosToCents(parsed.data.unit_price);
   const totalCents = Math.round(parsed.data.quantity * unitPriceCents);
-
-  const existingLines = await db
-    .select({ order: invoiceLine.order })
-    .from(invoiceLine)
-    .where(eq(invoiceLine.invoiceId, invoiceId));
+  const existingLines = await getInvoiceLines(invoiceId);
   const maxOrder = existingLines.reduce((m, l) => Math.max(m, l.order), -1);
 
-  await db.insert(invoiceLine).values({
-    invoiceId,
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase.from("invoice_line").insert({
+    invoice_id: invoiceId,
     order: maxOrder + 1,
     description: parsed.data.description,
     quantity: parsed.data.quantity.toString(),
-    unitType: parsed.data.unit_type,
-    unitPriceCents,
-    totalCents,
+    unit_type: parsed.data.unit_type,
+    unit_price_cents: unitPriceCents,
+    total_cents: totalCents,
+    time_entry_ids: [],
   });
+  if (error) throw error;
 
   await recomputeInvoiceTotal(invoiceId);
   revalidatePath(`/invoices/${invoiceId}`);
@@ -238,35 +268,54 @@ export async function deleteInvoiceLineAction(
   lineId: string,
 ) {
   const user = await requireUser();
-  const [inv] = await db
-    .select({ id: invoice.id, status: invoice.status })
-    .from(invoice)
-    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, user.id)))
-    .limit(1);
+  const inv = await getInvoiceForUser(invoiceId, user.id);
   if (!inv) return { error: "Facture introuvable" };
   if (inv.status !== "DRAFT") return { error: "Facture déjà émise" };
-  await db
-    .delete(invoiceLine)
-    .where(
-      and(eq(invoiceLine.id, lineId), eq(invoiceLine.invoiceId, invoiceId)),
-    );
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("invoice_line")
+    .delete()
+    .eq("id", lineId)
+    .eq("invoice_id", invoiceId);
+  if (error) throw error;
+
   await recomputeInvoiceTotal(invoiceId);
   revalidatePath(`/invoices/${invoiceId}`);
   return { success: true };
 }
 
-async function recomputeInvoiceTotal(invoiceId: string) {
-  const [r] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${invoiceLine.totalCents}), 0)`,
-    })
-    .from(invoiceLine)
-    .where(eq(invoiceLine.invoiceId, invoiceId));
-  const total = Number(r.total);
-  await db
-    .update(invoice)
-    .set({ subtotalCents: total, totalCents: total, updatedAt: new Date() })
-    .where(eq(invoice.id, invoiceId));
+const lineDescriptionSchema = z.object({
+  description: z.string().trim().min(1, "La description est obligatoire"),
+});
+
+export async function updateInvoiceLineDescriptionAction(
+  invoiceId: string,
+  lineId: string,
+  formData: FormData,
+) {
+  const user = await requireUser();
+  const parsed = lineDescriptionSchema.safeParse(
+    Object.fromEntries(formData.entries()),
+  );
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const inv = await getInvoiceForUser(invoiceId, user.id);
+  if (!inv) return { error: "Facture introuvable" };
+  if (inv.status !== "DRAFT") return { error: "Facture déjà émise" };
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("invoice_line")
+    .update({ description: parsed.data.description })
+    .eq("id", lineId)
+    .eq("invoice_id", invoiceId);
+  if (error) throw error;
+
+  revalidatePath(`/invoices/${invoiceId}`);
+  return { success: "Description mise à jour." };
 }
 
 const detailsSchema = z.object({
@@ -284,57 +333,48 @@ export async function updateInvoiceDetailsAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
-  const [inv] = await db
-    .select({ id: invoice.id, status: invoice.status })
-    .from(invoice)
-    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, user.id)))
-    .limit(1);
+  const inv = await getInvoiceForUser(invoiceId, user.id);
   if (!inv) return { error: "Facture introuvable" };
   if (inv.status !== "DRAFT") return { error: "Facture déjà émise" };
-  await db
-    .update(invoice)
-    .set({
-      issueDate: parsed.data.issue_date,
-      dueDate: parsed.data.due_date,
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("invoice")
+    .update({
+      issue_date: parsed.data.issue_date,
+      due_date: parsed.data.due_date,
       notes: parsed.data.notes || null,
-      updatedAt: new Date(),
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(invoice.id, invoiceId));
+    .eq("id", invoiceId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath(`/invoices/${invoiceId}`);
   return { success: "Mis à jour." };
 }
 
 export async function emitInvoiceAction(invoiceId: string) {
   const user = await requireUser();
-  const [inv] = await db
-    .select()
-    .from(invoice)
-    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, user.id)))
-    .limit(1);
+  const inv = await getInvoiceForUser(invoiceId, user.id);
   if (!inv) return { error: "Facture introuvable" };
   if (inv.status !== "DRAFT") return { error: "Facture déjà émise" };
 
-  const lines = await db
-    .select()
-    .from(invoiceLine)
-    .where(eq(invoiceLine.invoiceId, invoiceId))
-    .orderBy(invoiceLine.order);
+  const lines = await getInvoiceLines(invoiceId);
   if (lines.length === 0) {
     return { error: "Ajoute au moins une ligne avant d'émettre." };
   }
 
-  const number = await allocateInvoiceNumber(user.id, new Date(inv.issueDate));
-
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(eq(clientTable.id, inv.clientId))
-    .limit(1);
+  const profileRow = await getProfile(user.id);
+  const supabase = await getSupabaseDb();
+  const { data: clientRow, error: clientError } = await supabase
+    .from("client")
+    .select("*")
+    .eq("id", inv.clientId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (clientError) throw clientError;
+  const c = clientRow ? toClient(clientRow) : null;
   if (!profileRow || !c) return { error: "Données manquantes" };
 
   const profileMissing = getProfileMissingFields(profileRow);
@@ -349,6 +389,7 @@ export async function emitInvoiceAction(invoiceId: string) {
     };
   }
 
+  const number = await allocateInvoiceNumber(user.id, new Date(inv.issueDate));
   const buffer = await renderInvoicePDFToBuffer({
     invoice: { ...inv, number },
     lines,
@@ -356,38 +397,41 @@ export async function emitInvoiceAction(invoiceId: string) {
     profile: profileRow,
   });
 
-  const supabase = await createSupabase();
+  const storage = await createSupabase();
   const path = `${user.id}/${number}.pdf`;
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await storage.storage
     .from("invoices")
     .upload(path, buffer, {
       contentType: "application/pdf",
       upsert: true,
     });
-  if (uploadError) {
-    return { error: `Upload PDF: ${uploadError.message}` };
-  }
+  if (uploadError) return { error: `Upload PDF: ${uploadError.message}` };
+
+  const { error: updateError } = await supabase
+    .from("invoice")
+    .update({
+      number,
+      status: "SENT",
+      sent_at: new Date().toISOString(),
+      pdf_storage_path: path,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", invoiceId)
+    .eq("user_id", user.id);
+  if (updateError) throw updateError;
 
   const allTimeEntryIds = lines.flatMap((l) => l.timeEntryIds);
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(invoice)
-      .set({
-        number,
-        status: "SENT",
-        sentAt: new Date(),
-        pdfStoragePath: path,
-        updatedAt: new Date(),
+  if (allTimeEntryIds.length > 0) {
+    const { error } = await supabase
+      .from("time_entry")
+      .update({
+        invoice_id: invoiceId,
+        updated_at: new Date().toISOString(),
       })
-      .where(eq(invoice.id, invoiceId));
-    if (allTimeEntryIds.length > 0) {
-      await tx
-        .update(timeEntry)
-        .set({ invoiceId, updatedAt: new Date() })
-        .where(inArray(timeEntry.id, allTimeEntryIds));
-    }
-  });
+      .in("id", allTimeEntryIds)
+      .eq("user_id", user.id);
+    if (error) throw error;
+  }
 
   revalidatePath("/", "layout");
   return { success: "Facture émise." };
@@ -400,52 +444,138 @@ export async function markInvoicePaidAction(
   const user = await requireUser();
   const method = (formData.get("method") as string) || "Virement";
   const reference = (formData.get("reference") as string) || null;
-  const [inv] = await db
-    .select({ status: invoice.status })
-    .from(invoice)
-    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, user.id)))
-    .limit(1);
+  const inv = await getInvoiceForUser(invoiceId, user.id);
   if (!inv) return { error: "Facture introuvable" };
   if (inv.status !== "SENT" && inv.status !== "OVERDUE") {
     return { error: "Seules les factures émises peuvent être marquées payées." };
   }
-  await db
-    .update(invoice)
-    .set({
+
+  const supabase = await getSupabaseDb();
+  const { error } = await supabase
+    .from("invoice")
+    .update({
       status: "PAID",
-      paidAt: new Date(),
-      paymentMethod: method,
-      paymentReference: reference,
-      updatedAt: new Date(),
+      paid_at: new Date().toISOString(),
+      payment_method: method,
+      payment_reference: reference,
+      updated_at: new Date().toISOString(),
     })
-    .where(eq(invoice.id, invoiceId));
+    .eq("id", invoiceId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
   revalidatePath("/", "layout");
   return { success: "Facture marquée payée." };
 }
 
-export async function cancelInvoiceAction(invoiceId: string) {
+const sendInvoiceEmailSchema = z.object({
+  subject: z.string().trim().min(1, "L'objet est obligatoire"),
+  body: z.string().trim().min(1, "Le message est obligatoire"),
+});
+
+export async function sendInvoiceEmailAction(
+  invoiceId: string,
+  formData: FormData,
+) {
   const user = await requireUser();
-  const [inv] = await db
-    .select({ status: invoice.status })
-    .from(invoice)
-    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, user.id)))
-    .limit(1);
+  const parsed = sendInvoiceEmailSchema.safeParse(
+    Object.fromEntries(formData.entries()),
+  );
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const inv = await getInvoiceForUser(invoiceId, user.id);
   if (!inv) return { error: "Facture introuvable" };
   if (inv.status === "DRAFT") {
-    // Hard delete drafts
-    await db.delete(invoice).where(eq(invoice.id, invoiceId));
+    return { error: "Émets la facture avant de l'envoyer par email." };
+  }
+  if (!inv.number) return { error: "Numéro de facture manquant." };
+
+  const supabase = await getSupabaseDb();
+  const [profileRow, clientResult, lines] = await Promise.all([
+    getProfile(user.id),
+    supabase
+      .from("client")
+      .select("*")
+      .eq("id", inv.clientId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    getInvoiceLines(invoiceId),
+  ]);
+  if (clientResult.error) throw clientResult.error;
+
+  const c = clientResult.data ? toClient(clientResult.data) : null;
+  if (!profileRow || !c) return { error: "Données manquantes." };
+  if (!c.email) {
+    return { error: `Aucun email renseigné pour ${c.name}.` };
+  }
+
+  const pdf = await renderInvoicePDFToBuffer({
+    invoice: inv,
+    lines,
+    client: c,
+    profile: profileRow,
+  });
+
+  const result = await sendInvoiceEmail({
+    to: c.email,
+    fromName: profileRow.businessName,
+    replyTo: profileRow.email,
+    invoiceNumber: inv.number,
+    subject: parsed.data.subject,
+    body: parsed.data.body,
+    pdf,
+  });
+
+  if (result.error) return result;
+
+  const { error: updateError } = await supabase
+    .from("invoice")
+    .update({
+      email_sent_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", invoiceId)
+    .eq("user_id", user.id);
+  if (updateError) throw updateError;
+
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/invoices");
+  return { success: `Email envoyé à ${c.email}.` };
+}
+
+export async function cancelInvoiceAction(invoiceId: string) {
+  const user = await requireUser();
+  const inv = await getInvoiceForUser(invoiceId, user.id);
+  if (!inv) return { error: "Facture introuvable" };
+
+  const supabase = await getSupabaseDb();
+  if (inv.status === "DRAFT") {
+    const { error } = await supabase
+      .from("invoice")
+      .delete()
+      .eq("id", invoiceId)
+      .eq("user_id", user.id);
+    if (error) throw error;
     revalidatePath("/invoices");
     redirect("/invoices");
   }
-  await db
-    .update(invoice)
-    .set({ status: "CANCELLED", updatedAt: new Date() })
-    .where(eq(invoice.id, invoiceId));
-  // Free the time entries so they can be re-billed
-  await db
-    .update(timeEntry)
-    .set({ invoiceId: null, updatedAt: new Date() })
-    .where(eq(timeEntry.invoiceId, invoiceId));
+
+  const { error } = await supabase
+    .from("invoice")
+    .update({ status: "CANCELLED", updated_at: new Date().toISOString() })
+    .eq("id", invoiceId)
+    .eq("user_id", user.id);
+  if (error) throw error;
+
+  const { error: entriesError } = await supabase
+    .from("time_entry")
+    .update({ invoice_id: null, updated_at: new Date().toISOString() })
+    .eq("invoice_id", invoiceId)
+    .eq("user_id", user.id);
+  if (entriesError) throw entriesError;
+
   revalidatePath("/", "layout");
   return { success: "Facture annulée." };
 }

@@ -1,14 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/db";
-import {
-  client as clientTable,
-  invoice,
-  invoiceLine,
-} from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -19,12 +11,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCents } from "@/lib/money";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { InvoiceActions } from "./invoice-actions";
-import { DraftLineEditor } from "./draft-line-editor";
+import {
+  AddInvoiceLineForm,
+  DeleteInvoiceLineButton,
+  EditInvoiceLineDescription,
+} from "./draft-line-editor";
 import { DraftDetailsEditor } from "./draft-details-editor";
 import { ArrowLeft } from "lucide-react";
+import {
+  getSupabaseDb,
+  toClient,
+  toInvoice,
+  toInvoiceLine,
+} from "@/lib/supabase/db";
 
 const STATUS_LABELS = {
   DRAFT: "Brouillon",
@@ -49,25 +51,37 @@ export default async function InvoiceDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
+  const supabase = await getSupabaseDb();
 
-  const [inv] = await db
-    .select()
-    .from(invoice)
-    .where(and(eq(invoice.id, id), eq(invoice.userId, user.id)))
-    .limit(1);
+  const { data: invoiceRow, error: invoiceError } = await supabase
+    .from("invoice")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (invoiceError) throw invoiceError;
+  const inv = invoiceRow ? toInvoice(invoiceRow) : null;
   if (!inv) notFound();
 
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(eq(clientTable.id, inv.clientId))
-    .limit(1);
+  const [{ data: clientRow, error: clientError }, { data: lineRows, error: linesError }] =
+    await Promise.all([
+      supabase
+        .from("client")
+        .select("*")
+        .eq("id", inv.clientId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("invoice_line")
+        .select("*")
+        .eq("invoice_id", id)
+        .order("order", { ascending: true }),
+    ]);
+  if (clientError) throw clientError;
+  if (linesError) throw linesError;
 
-  const lines = await db
-    .select()
-    .from(invoiceLine)
-    .where(eq(invoiceLine.invoiceId, id))
-    .orderBy(invoiceLine.order);
+  const c = clientRow ? toClient(clientRow) : null;
+  const lines = (lineRows ?? []).map(toInvoiceLine);
 
   const isDraft = inv.status === "DRAFT";
 
@@ -95,8 +109,13 @@ export default async function InvoiceDetailPage({
               {c?.name} · Émise le {formatDate(inv.issueDate)} · Échéance{" "}
               {formatDate(inv.dueDate)}
             </p>
+            {inv.emailSentAt && (
+              <p className="mt-1 text-sm text-emerald-600">
+                Envoyée par email le {formatDateTime(inv.emailSentAt)}
+              </p>
+            )}
           </div>
-          <InvoiceActions invoice={inv} />
+          <InvoiceActions invoice={inv} clientEmail={c?.email ?? null} />
         </div>
       </div>
 
@@ -117,7 +136,17 @@ export default async function InvoiceDetailPage({
               <TableBody>
                 {lines.map((l) => (
                   <TableRow key={l.id}>
-                    <TableCell className="max-w-xs">{l.description}</TableCell>
+                    <TableCell className="max-w-xs">
+                      {isDraft ? (
+                        <EditInvoiceLineDescription
+                          invoiceId={id}
+                          lineId={l.id}
+                          description={l.description}
+                        />
+                      ) : (
+                        l.description
+                      )}
+                    </TableCell>
                     <TableCell className="text-right text-muted-foreground">
                       {l.quantity} {rateTypeLabel(l.unitType)}
                     </TableCell>
@@ -129,7 +158,7 @@ export default async function InvoiceDetailPage({
                     </TableCell>
                     {isDraft && (
                       <TableCell className="text-right">
-                        <DraftLineEditor.DeleteButton
+                        <DeleteInvoiceLineButton
                           invoiceId={id}
                           lineId={l.id}
                         />
@@ -149,7 +178,7 @@ export default async function InvoiceDetailPage({
               </TableBody>
             </Table>
           </div>
-          {isDraft && <DraftLineEditor.AddForm invoiceId={id} />}
+          {isDraft && <AddInvoiceLineForm invoiceId={id} />}
           {isDraft && <DraftDetailsEditor invoice={inv} />}
           {!isDraft && inv.notes && (
             <div className="rounded-md border bg-muted/35 px-4 py-3 text-sm italic">

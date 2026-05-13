@@ -1,37 +1,62 @@
-import { db } from "@/db";
-import { client, profile, timeEntry } from "@/db/schema";
-import { and, eq, isNull, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { NewInvoiceWizard } from "./wizard";
 import { getProfileMissingFields } from "@/lib/billing-readiness";
+import {
+  getProfile,
+  getSupabaseDb,
+  toClient,
+  toTimeEntry,
+  toTodoProject,
+} from "@/lib/supabase/db";
+import type { Client, TodoProject } from "@/db/schema";
+
+type ProjectOption = TodoProject & { client: Client };
+
+function isProjectOption(project: ProjectOption | null): project is ProjectOption {
+  return project !== null;
+}
 
 export default async function NewInvoicePage({
   searchParams,
 }: {
-  searchParams: Promise<{ client?: string }>;
+  searchParams: Promise<{ client?: string; project?: string }>;
 }) {
   const user = await requireUser();
-  const { client: preselectedClientId } = await searchParams;
+  const { client: preselectedClientId, project: requestedProjectId } =
+    await searchParams;
+  const supabase = await getSupabaseDb();
 
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const profileRow = await getProfile(user.id);
 
-  const clients = await db
-    .select()
-    .from(client)
-    .where(and(eq(client.userId, user.id), eq(client.archived, false)))
-    .orderBy(client.name);
+  const { data: projectRows, error: projectsError } = await supabase
+    .from("todo_project")
+    .select("*, client:client_id(*)")
+    .eq("user_id", user.id)
+    .not("client_id", "is", null)
+    .order("name", { ascending: true });
+  if (projectsError) throw projectsError;
 
-  const unbilledEntries = await db
-    .select()
-    .from(timeEntry)
-    .where(
-      and(eq(timeEntry.userId, user.id), isNull(timeEntry.invoiceId)),
-    )
-    .orderBy(desc(timeEntry.date));
+  const projects = (projectRows ?? [])
+    .map((row) => {
+      const rawClient = Array.isArray(row.client) ? row.client[0] : row.client;
+      return rawClient ? { ...toTodoProject(row), client: toClient(rawClient) } : null;
+    })
+    .filter(isProjectOption)
+    .filter((project) => !project.client.archived);
+  const preselectedProjectId =
+    projects.find((project) => project.id === requestedProjectId)?.id ??
+    (preselectedClientId
+      ? projects.find((project) => project.clientId === preselectedClientId)?.id
+      : undefined);
+
+  const { data: entryRows, error: entriesError } = await supabase
+    .from("time_entry")
+    .select("*")
+    .eq("user_id", user.id)
+    .is("invoice_id", null)
+    .order("date", { ascending: false });
+  if (entriesError) throw entriesError;
+  const unbilledEntries = (entryRows ?? []).map(toTimeEntry);
 
   const profileMissing = getProfileMissingFields(profileRow);
 
@@ -42,13 +67,13 @@ export default async function NewInvoicePage({
           Nouvelle facture
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Choisis un client puis sélectionne les saisies à facturer.
+          Choisis un projet puis sélectionne les saisies à facturer.
         </p>
       </div>
       <NewInvoiceWizard
-        clients={clients}
+        projects={projects}
         unbilledEntries={unbilledEntries}
-        preselectedClientId={preselectedClientId}
+        preselectedProjectId={preselectedProjectId}
         profileMissing={profileMissing}
       />
     </div>

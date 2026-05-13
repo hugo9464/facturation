@@ -1,6 +1,3 @@
-import { db } from "@/db";
-import { client, timeEntry } from "@/db/schema";
-import { and, eq, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { formatCents } from "@/lib/money";
@@ -9,25 +6,53 @@ import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { startOfWeek, format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { EntryRowActions } from "./entry-row-actions";
+import {
+  getSupabaseDb,
+  toClient,
+  toTimeEntry,
+  toTodoProject,
+} from "@/lib/supabase/db";
+import type { TimeEntryProjectOption } from "@/components/time-entry-dialog";
+
+function isProjectOption(
+  project: TimeEntryProjectOption | null,
+): project is TimeEntryProjectOption {
+  return project !== null;
+}
 
 export default async function TimePage() {
   const user = await requireUser();
-  const [rows, clients] = await Promise.all([
-    db
-      .select({
-        entry: timeEntry,
-        clientName: client.name,
-      })
-      .from(timeEntry)
-      .innerJoin(client, eq(client.id, timeEntry.clientId))
-      .where(eq(timeEntry.userId, user.id))
-      .orderBy(desc(timeEntry.date), desc(timeEntry.createdAt)),
-    db
-      .select()
-      .from(client)
-      .where(and(eq(client.userId, user.id), eq(client.archived, false)))
-      .orderBy(client.name),
+  const supabase = await getSupabaseDb();
+  const [entriesResult, projectsResult] = await Promise.all([
+    supabase
+      .from("time_entry")
+      .select("*, client:client_id(name), project:project_id(name)")
+      .eq("user_id", user.id)
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("todo_project")
+      .select("*, client:client_id(*)")
+      .eq("user_id", user.id)
+      .not("client_id", "is", null)
+      .order("name", { ascending: true }),
   ]);
+  if (entriesResult.error) throw entriesResult.error;
+  if (projectsResult.error) throw projectsResult.error;
+  const rows = (entriesResult.data ?? []).map((row) => ({
+    entry: toTimeEntry(row),
+    clientName: Array.isArray(row.client) ? row.client[0]?.name : row.client?.name,
+    projectName: Array.isArray(row.project) ? row.project[0]?.name : row.project?.name,
+  }));
+  const projects: TimeEntryProjectOption[] = (projectsResult.data ?? [])
+    .map((row): TimeEntryProjectOption | null => {
+      const rawClient = Array.isArray(row.client) ? row.client[0] : row.client;
+      if (!rawClient) return null;
+      const client = toClient(rawClient);
+      if (client.archived) return null;
+      return { ...toTodoProject(row), client };
+    })
+    .filter(isProjectOption);
 
   // Group by ISO week
   const groups = new Map<
@@ -109,8 +134,13 @@ export default async function TimePage() {
                       <span className="w-20 text-muted-foreground">
                         {formatDate(r.entry.date)}
                       </span>
-                      <span className="font-medium min-w-[8rem]">
-                        {r.clientName}
+                      <span className="font-medium min-w-[10rem]">
+                        {r.projectName ?? r.clientName}
+                        {r.projectName && (
+                          <span className="block text-xs font-normal text-muted-foreground">
+                            {r.clientName}
+                          </span>
+                        )}
                       </span>
                       <span className="text-muted-foreground min-w-[6rem]">
                         {r.entry.quantity} {rateTypeLabel(r.entry.type)}
@@ -133,7 +163,7 @@ export default async function TimePage() {
                       {!r.entry.invoiceId && (
                         <EntryRowActions
                           entry={r.entry}
-                          clients={clients}
+                          projects={projects}
                         />
                       )}
                     </div>

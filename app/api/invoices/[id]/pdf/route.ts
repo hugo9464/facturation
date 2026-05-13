@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import {
-  client as clientTable,
-  invoice,
-  invoiceLine,
-  profile,
-} from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { renderInvoicePDFToBuffer } from "@/lib/pdf-render";
 import { createClient as createSupabase } from "@/lib/supabase/server";
+import {
+  getProfile,
+  getSupabaseDb,
+  toClient,
+  toInvoice,
+  toInvoiceLine,
+} from "@/lib/supabase/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,11 +19,15 @@ export async function GET(
 ) {
   const { id } = await params;
   const user = await requireUser();
-  const [inv] = await db
-    .select()
-    .from(invoice)
-    .where(and(eq(invoice.id, id), eq(invoice.userId, user.id)))
-    .limit(1);
+  const supabaseDb = await getSupabaseDb();
+  const { data: invoiceRow, error: invoiceError } = await supabaseDb
+    .from("invoice")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (invoiceError) throw invoiceError;
+  const inv = invoiceRow ? toInvoice(invoiceRow) : null;
   if (!inv) return new NextResponse("Not found", { status: 404 });
 
   // For finalized invoices with stored PDF, redirect to signed URL
@@ -39,21 +42,24 @@ export async function GET(
   }
 
   // Otherwise render live (DRAFT or fallback)
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
-  const [c] = await db
-    .select()
-    .from(clientTable)
-    .where(eq(clientTable.id, inv.clientId))
-    .limit(1);
-  const lines = await db
-    .select()
-    .from(invoiceLine)
-    .where(eq(invoiceLine.invoiceId, id))
-    .orderBy(invoiceLine.order);
+  const [profileRow, clientResult, linesResult] = await Promise.all([
+    getProfile(user.id),
+    supabaseDb
+      .from("client")
+      .select("*")
+      .eq("id", inv.clientId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabaseDb
+      .from("invoice_line")
+      .select("*")
+      .eq("invoice_id", id)
+      .order("order", { ascending: true }),
+  ]);
+  if (clientResult.error) throw clientResult.error;
+  if (linesResult.error) throw linesResult.error;
+  const c = clientResult.data ? toClient(clientResult.data) : null;
+  const lines = (linesResult.data ?? []).map(toInvoiceLine);
 
   if (!profileRow || !c) {
     return new NextResponse("Profile or client missing", { status: 500 });

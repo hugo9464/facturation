@@ -1,7 +1,4 @@
 import { notFound } from "next/navigation";
-import { db } from "@/db";
-import { client, invoice, profile, timeEntry } from "@/db/schema";
-import { and, eq, desc, isNull } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +26,13 @@ import { ArchiveButton } from "./archive-button";
 import { formatCents } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
+import {
+  getProfile,
+  getSupabaseDb,
+  toClient,
+  toInvoice,
+  toTimeEntry,
+} from "@/lib/supabase/db";
 
 const STATUS_VARIANTS = {
   DRAFT: "secondary",
@@ -53,34 +57,41 @@ export default async function ClientDetailPage({
 }) {
   const { id } = await params;
   const user = await requireUser();
+  const supabase = await getSupabaseDb();
 
-  const [c] = await db
-    .select()
-    .from(client)
-    .where(and(eq(client.id, id), eq(client.userId, user.id)))
-    .limit(1);
+  const { data: clientRow, error: clientError } = await supabase
+    .from("client")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (clientError) throw clientError;
+  const c = clientRow ? toClient(clientRow) : null;
   if (!c) notFound();
 
-  const [profileRow] = await db
-    .select()
-    .from(profile)
-    .where(eq(profile.userId, user.id))
-    .limit(1);
+  const profileRow = await getProfile(user.id);
 
-  const [unbilledEntries, recentInvoices] = await Promise.all([
-    db
-      .select()
-      .from(timeEntry)
-      .where(and(eq(timeEntry.clientId, c.id), isNull(timeEntry.invoiceId)))
-      .orderBy(desc(timeEntry.date))
+  const [entriesResult, invoicesResult] = await Promise.all([
+    supabase
+      .from("time_entry")
+      .select("*")
+      .eq("client_id", c.id)
+      .eq("user_id", user.id)
+      .is("invoice_id", null)
+      .order("date", { ascending: false })
       .limit(50),
-    db
-      .select()
-      .from(invoice)
-      .where(eq(invoice.clientId, c.id))
-      .orderBy(desc(invoice.issueDate))
+    supabase
+      .from("invoice")
+      .select("*")
+      .eq("client_id", c.id)
+      .eq("user_id", user.id)
+      .order("issue_date", { ascending: false })
       .limit(20),
   ]);
+  if (entriesResult.error) throw entriesResult.error;
+  if (invoicesResult.error) throw invoicesResult.error;
+  const unbilledEntries = (entriesResult.data ?? []).map(toTimeEntry);
+  const recentInvoices = (invoicesResult.data ?? []).map(toInvoice);
 
   const unbilledTotalCents = unbilledEntries.reduce(
     (acc, e) => acc + Math.round(Number(e.quantity) * e.rateCents),

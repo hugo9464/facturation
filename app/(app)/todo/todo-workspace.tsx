@@ -12,13 +12,22 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
+  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, Copy, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  GripVertical,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -74,19 +83,11 @@ const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
 const PROJECT_STORAGE_KEY = "facturation.todo.project.v1";
 type TodoView = "list" | "kanban";
 const TODO_LIST_STATUSES = [
+  "TODO",
   "IN_PROGRESS",
   "TO_TEST",
-  "TODO",
-  "BACKLOG",
   "DONE",
-  "CANCELLED",
 ] as const satisfies readonly TodoStatus[];
-const TODO_PRIMARY_LIST_STATUSES = new Set<TodoStatus>([
-  "IN_PROGRESS",
-  "TO_TEST",
-  "TODO",
-  "DONE",
-]);
 
 function compareTasks(a: TodoTaskView, b: TodoTaskView) {
   return (
@@ -109,10 +110,6 @@ function statusDotClass(status: TodoStatus) {
       return "border-[#5aa2ff] bg-transparent shadow-[0_0_0_2px_rgba(90,162,255,0.16)]";
     case "DONE":
       return "border-[#45d483] bg-[linear-gradient(90deg,#45d483_50%,transparent_50%)]";
-    case "CANCELLED":
-      return "border-[#ff5b62] bg-[linear-gradient(90deg,#ff5b62_50%,transparent_50%)]";
-    case "BACKLOG":
-      return "border-[#737380] bg-transparent";
   }
 }
 
@@ -150,19 +147,35 @@ function moveTask(
   tasks: TodoTaskView[],
   activeId: string,
   overId: string,
+  insertAfterOverTask = false,
 ): TodoTaskView[] {
   const active = tasks.find((task) => task.id === activeId);
   if (!active) return tasks;
 
+  const overTask = tasks.find((task) => task.id === overId);
+  if (overTask && active.status === overTask.status) {
+    const grouped = tasksByStatus(tasks);
+    const statusItems = grouped[active.status];
+    const oldIndex = statusItems.findIndex((task) => task.id === activeId);
+    const newIndex = statusItems.findIndex((task) => task.id === overId);
+
+    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return tasks;
+
+    grouped[active.status] = arrayMove(statusItems, oldIndex, newIndex);
+    return TODO_STATUSES.flatMap((status) =>
+      grouped[status].map((task, index) => ({ ...task, order: index })),
+    );
+  }
+
   const withoutActive = tasks.filter((task) => task.id !== activeId);
-  const overTask = withoutActive.find((task) => task.id === overId);
   const targetStatus = isTodoStatus(overId)
     ? overId
     : (overTask?.status ?? active.status);
   const grouped = tasksByStatus(withoutActive);
   const targetItems = grouped[targetStatus];
   const targetIndex = overTask
-    ? Math.max(0, targetItems.findIndex((task) => task.id === overId))
+    ? Math.max(0, targetItems.findIndex((task) => task.id === overId)) +
+      (insertAfterOverTask ? 1 : 0)
     : targetItems.length;
 
   const nextTarget = [...targetItems];
@@ -186,6 +199,26 @@ function appendToStatus(
     ...tasks.filter((item) => item.id !== task.id),
     { ...task, status, order: count },
   ]);
+}
+
+function buildImplementationPrompt(task: TodoTaskView, project?: TodoProjectView) {
+  const description = task.description?.trim();
+  return [
+    `Implémente la tâche UC-${task.number}: ${task.title}`,
+    "",
+    `Projet: ${project?.name ?? "Projet non précisé"}`,
+    `Statut actuel: ${TODO_STATUS_LABELS[task.status]}`,
+    "",
+    "Contexte de la tâche:",
+    description ? description : "Aucune description fournie.",
+    "",
+    "Consignes:",
+    "- Analyse le code existant avant de modifier quoi que ce soit.",
+    "- Implémente la tâche en respectant les conventions du projet.",
+    "- Garde les changements ciblés sur cette tâche.",
+    "- Ajoute ou adapte les tests pertinents si le changement le justifie.",
+    "- Vérifie avec les commandes de lint/build/test disponibles.",
+  ].join("\n");
 }
 
 export function TodoWorkspace({
@@ -266,7 +299,7 @@ export function TodoWorkspace({
     return counts;
   }, [tasks]);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -297,11 +330,29 @@ export function TodoWorkspace({
 
   function onDragEnd(event: DragEndEvent) {
     const activeId = String(event.active.id);
-    const overId = event.over ? String(event.over.id) : null;
-    if (!overId || activeId === overId) return;
+    const over = event.over;
+    if (!over) return;
+    const overId = String(over.id);
+    if (activeId === overId) return;
+
+    if (!activeTasks.some((task) => task.id === activeId)) return;
 
     const previous = tasks;
-    const nextProjectTasks = moveTask(activeTasks, activeId, overId);
+    const overTask = activeTasks.find((task) => task.id === overId);
+    const activeTask = activeTasks.find((task) => task.id === activeId);
+    const translatedTop = event.active.rect.current.translated?.top;
+    const insertAfterOverTask =
+      Boolean(overTask && activeTask && overTask.status !== activeTask.status) &&
+      typeof translatedTop === "number" &&
+      translatedTop > over.rect.top + over.rect.height / 2;
+    const nextProjectTasks = moveTask(
+      activeTasks,
+      activeId,
+      overId,
+      insertAfterOverTask,
+    );
+    if (nextProjectTasks === activeTasks) return;
+
     const nextTasks = normalizeOrders([
       ...tasks.filter((task) => task.projectId !== selectedProjectId),
       ...nextProjectTasks,
@@ -389,23 +440,15 @@ export function TodoWorkspace({
     });
   }
 
-  function duplicateTask(task: TodoTaskView) {
-    startTransition(async () => {
-      const result = await createTodoTaskAction({
-        projectId: task.projectId,
-        title: task.title,
-        description: task.description ?? "",
-        status: task.status,
-      });
-      if ("error" in result && result.error) {
-        toast.error(result.error);
-        return;
-      }
-      const createdTask = "task" in result ? result.task : null;
-      if (!createdTask) return;
-      setTasks((current) => normalizeOrders([...current, createdTask]));
-      toast.success("Tâche dupliquée");
-    });
+  async function copyTaskPrompt(task: TodoTaskView) {
+    const project = projects.find((item) => item.id === task.projectId);
+    const prompt = buildImplementationPrompt(task, project);
+    try {
+      await window.navigator.clipboard.writeText(prompt);
+      toast.success("Prompt copié");
+    } catch {
+      toast.error("Impossible de copier le prompt");
+    }
   }
 
   function updateTask(
@@ -495,7 +538,7 @@ export function TodoWorkspace({
   return (
     <div className="-mx-4 -my-6 min-h-[calc(100vh-3.5rem)] bg-[#17171a] px-4 py-5 text-[#f2f2f4] md:-mx-6 md:px-10">
       {projects.length === 0 ? (
-        <div className="rounded-[24px] border border-[#2b2b30] bg-[#111113] p-12 text-center">
+        <div className="rounded-[24px] border border-[#2b2b30] bg-[#1d1d21] p-12 text-center">
           <p className="text-sm text-[#777780]">
             Aucun projet pour l&apos;instant.
           </p>
@@ -521,7 +564,7 @@ export function TodoWorkspace({
                 onEdit={setEditingTask}
                 onDelete={setTaskToDelete}
                 onAdvance={advanceTask}
-                onDuplicate={duplicateTask}
+                onCopyPrompt={copyTaskPrompt}
               />
             </DndContext>
             <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
@@ -602,7 +645,7 @@ type TodoViewProps = {
 };
 
 type TodoLinearViewProps = TodoViewProps & {
-  onDuplicate: (task: TodoTaskView) => void;
+  onCopyPrompt: (task: TodoTaskView) => void;
 };
 
 function TodoLinearListView({
@@ -612,11 +655,20 @@ function TodoLinearListView({
   onEdit,
   onDelete,
   onAdvance,
-  onDuplicate,
+  onCopyPrompt,
 }: TodoLinearViewProps) {
-  const statuses = TODO_LIST_STATUSES.filter(
-    (status) => TODO_PRIMARY_LIST_STATUSES.has(status) || grouped[status].length > 0,
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TodoStatus>>(
+    () => new Set(["DONE"]),
   );
+  const statuses = TODO_LIST_STATUSES;
+  function toggleStatus(status: TodoStatus) {
+    setCollapsedStatuses((current) => {
+      const next = new Set(current);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-7">
@@ -625,12 +677,14 @@ function TodoLinearListView({
           key={status}
           status={status}
           tasks={grouped[status]}
+          collapsed={collapsedStatuses.has(status)}
           pendingIds={pendingIds}
           onCreate={onCreate}
+          onToggleCollapse={toggleStatus}
           onEdit={onEdit}
           onDelete={onDelete}
           onAdvance={onAdvance}
-          onDuplicate={onDuplicate}
+          onCopyPrompt={onCopyPrompt}
         />
       ))}
     </div>
@@ -640,22 +694,39 @@ function TodoLinearListView({
 function TodoLinearSection({
   status,
   tasks,
+  collapsed,
   pendingIds,
   onCreate,
+  onToggleCollapse,
   onEdit,
   onDelete,
   onAdvance,
-  onDuplicate,
+  onCopyPrompt,
 }: Omit<TodoLinearViewProps, "grouped"> & {
   status: TodoStatus;
   tasks: TodoTaskView[];
+  collapsed: boolean;
+  onToggleCollapse: (status: TodoStatus) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const { setNodeRef, isOver } = useDroppable({
+    id: status,
+    data: { type: "status", status },
+  });
 
   return (
     <section ref={setNodeRef} className={cn(isOver && "rounded-xl bg-white/[0.03]")}>
       <div className="mb-3 flex items-center justify-between px-2 sm:px-3">
-        <div className="flex min-w-0 items-center gap-2.5">
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-2.5 rounded-md text-left"
+          onClick={() => onToggleCollapse(status)}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? (
+            <ChevronRight className="size-4 shrink-0 text-[#777780]" />
+          ) : (
+            <ChevronDown className="size-4 shrink-0 text-[#777780]" />
+          )}
           <span
             className={cn("size-3.5 shrink-0 rounded-full border", statusDotClass(status))}
             aria-hidden="true"
@@ -664,7 +735,7 @@ function TodoLinearSection({
             {todoListLabel(status)}
           </h2>
           <span className="text-[13px] leading-none text-[#777780]">{tasks.length}</span>
-        </div>
+        </button>
         <button
           type="button"
           className="grid size-7 shrink-0 place-items-center rounded-full text-[#f2f2f4] transition-colors hover:bg-white/[0.06]"
@@ -674,30 +745,32 @@ function TodoLinearSection({
           <Plus className="size-5 stroke-[2.2]" />
         </button>
       </div>
-      <SortableContext
-        items={tasks.map((task) => task.id)}
-        strategy={verticalListSortingStrategy}
-      >
-        <div className="overflow-hidden rounded-xl border border-[#2d2d32] bg-[#101012]">
-          {tasks.length === 0 ? (
-            <p className="flex h-12 items-center justify-center text-sm font-medium text-[#666671]">
-              Aucune tâche
-            </p>
-          ) : (
-            tasks.map((task) => (
-              <SortableLinearTaskRow
-                key={task.id}
-                task={task}
-                pending={pendingIds.has(task.id)}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onAdvance={onAdvance}
-                onDuplicate={onDuplicate}
-              />
-            ))
-          )}
-        </div>
-      </SortableContext>
+      {!collapsed && (
+        <SortableContext
+          items={tasks.map((task) => task.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="overflow-hidden rounded-xl border border-[#2d2d32] bg-[#1d1d21]">
+            {tasks.length === 0 ? (
+              <p className="flex h-12 items-center justify-center text-sm font-medium text-[#666671]">
+                Aucune tâche
+              </p>
+            ) : (
+              tasks.map((task) => (
+                <SortableLinearTaskRow
+                  key={task.id}
+                  task={task}
+                  pending={pendingIds.has(task.id)}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onAdvance={onAdvance}
+                  onCopyPrompt={onCopyPrompt}
+                />
+              ))
+            )}
+          </div>
+        </SortableContext>
+      )}
     </section>
   );
 }
@@ -708,9 +781,9 @@ function SortableLinearTaskRow({
   onEdit,
   onDelete,
   onAdvance,
-  onDuplicate,
+  onCopyPrompt,
 }: SortableTaskProps & {
-  onDuplicate: (task: TodoTaskView) => void;
+  onCopyPrompt: (task: TodoTaskView) => void;
 }) {
   const {
     attributes,
@@ -719,7 +792,10 @@ function SortableLinearTaskRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: task.id });
+  } = useSortable({
+    id: task.id,
+    data: { type: "task", status: task.status },
+  });
   const nextStatus = nextTodoStatus(task.status);
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -740,24 +816,22 @@ function SortableLinearTaskRow({
         }
       }}
       className={cn(
-        "grid min-h-11 cursor-pointer grid-cols-[26px_72px_minmax(0,1fr)_34px_34px_34px] items-center border-b border-[#242428] bg-[#101012] px-4 text-[#f0f0f2] last:border-b-0",
-        "transition-colors hover:bg-[#151519] max-sm:grid-cols-[22px_58px_minmax(0,1fr)_30px_30px_30px] max-sm:px-2",
+        "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
+        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_58px_minmax(0,1fr)_30px_30px_30px] max-sm:px-2",
         isDragging && "relative z-10 shadow-2xl shadow-black/40",
         pending && "opacity-60",
       )}
     >
       <button
         type="button"
-        className="grid size-4 cursor-grab place-items-center rounded-full active:cursor-grabbing"
+        className="grid size-7 touch-none cursor-grab place-items-center rounded-md text-[#777780] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] active:cursor-grabbing"
         aria-label="Déplacer"
+        title="Déplacer"
         onClick={(event) => event.stopPropagation()}
         {...attributes}
         {...listeners}
       >
-        <span
-          className={cn("size-3.5 rounded-full border", statusDotClass(task.status))}
-          aria-hidden="true"
-        />
+        <GripVertical className="size-4 stroke-[1.9]" aria-hidden="true" />
       </button>
       <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89]">
         UC-{task.number}
@@ -784,9 +858,10 @@ function SortableLinearTaskRow({
         disabled={pending}
         onClick={(event) => {
           event.stopPropagation();
-          onDuplicate(task);
+          onCopyPrompt(task);
         }}
-        aria-label="Dupliquer"
+        aria-label="Copier le prompt d'implémentation"
+        title="Copier le prompt d'implémentation"
       >
         <Copy className="size-3.5 stroke-[1.9]" />
       </button>

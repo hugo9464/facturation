@@ -1,9 +1,6 @@
 import Link from "next/link";
-import { db } from "@/db";
-import { client } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -16,14 +13,18 @@ import { Badge } from "@/components/ui/badge";
 import { formatCents } from "@/lib/money";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { Plus } from "lucide-react";
+import { getSupabaseDb, toClient } from "@/lib/supabase/db";
 
 export default async function ClientsPage() {
   const user = await requireUser();
-  const rows = await db
-    .select()
-    .from(client)
-    .where(eq(client.userId, user.id))
-    .orderBy(client.name);
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("client")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("name", { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []).map(toClient);
 
   return (
     <div className="space-y-6">
