@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] - 2026-05-14
+
+### Chore
+- chore: ajout de `.worktreeinclude` pour copier `.env.local` dans les worktrees créés par Claude Code
+
 ## [0.2.0] - 2026-05-13
 
 ### Features
