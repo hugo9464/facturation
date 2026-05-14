@@ -84,6 +84,7 @@ import {
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/dates";
 
 const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
 const PROJECT_STORAGE_KEY = "facturation.todo.project.v1";
@@ -1007,6 +1008,14 @@ function SortableLinearTaskRow({
         <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
           {task.title}
         </span>
+        {task.completedAt && (
+          <span
+            className="shrink-0 font-mono text-[11px] leading-none text-[#777780]"
+            title="Date de fin"
+          >
+            {formatDate(task.completedAt)}
+          </span>
+        )}
         {task.prUrl ? (
           <a
             href={task.prUrl}
@@ -1214,6 +1223,11 @@ function TodoTaskDialog({
               </SelectContent>
             </Select>
           </div>
+          {task?.completedAt && (
+            <p className="text-xs text-muted-foreground">
+              Date de fin : {formatDate(task.completedAt)}
+            </p>
+          )}
           <DialogFooter>
             <Button type="submit" disabled={pending || !title.trim()}>
               {pending ? "Enregistrement..." : "Enregistrer"}

@@ -183,6 +183,7 @@ export function toTodoTask(row: Raw): TodoTask {
     order: Number(row.order),
     previewUrl: (row.preview_url as string | null) ?? null,
     prUrl: (row.pr_url as string | null) ?? null,
+    completedAt: date(row.completed_at),
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };

@@ -14,6 +14,7 @@ import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
 function serializeTask(task: TodoTask): TodoTaskView {
   return {
     ...task,
+    completedAt: task.completedAt ? task.completedAt.toISOString() : null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),

@@ -185,6 +185,7 @@ export type TodoTask = {
   order: number;
   previewUrl: string | null;
   prUrl: string | null;
+  completedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

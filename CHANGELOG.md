@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-05-14
+
+### Features
+- feat: suivi de la date de fin des tâches todo — `completedAt` posé automatiquement au passage en « À valider » / « Terminé », conservé tant que la tâche y reste, effacé si elle revient en amont ; affichage de la date sur la ligne de tâche et dans la modale
+
+### Database
+- migration 20260514120000: colonne `completed_at` sur `todo_task`
+
+### Chore
+- chore: ajout des dépendances `pg` / `@types/pg`
+- chore: ignore `.claude/worktrees/` et `.lanes/` (outillage local)
+
 ## [0.3.0] - 2026-05-14
 
 ### Features

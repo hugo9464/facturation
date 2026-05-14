@@ -47,7 +47,11 @@ const reorderSchema = z.array(
   }),
 );
 
-export type TodoTaskView = Omit<TodoTask, "createdAt" | "updatedAt"> & {
+export type TodoTaskView = Omit<
+  TodoTask,
+  "completedAt" | "createdAt" | "updatedAt"
+> & {
+  completedAt: string | null;
   createdAt: string;
   updatedAt: string;
   previewToken: string | null;
@@ -61,10 +65,24 @@ export type TodoProjectView = Omit<TodoProject, "createdAt" | "updatedAt"> & {
 function serializeTask(task: TodoTask): TodoTaskView {
   return {
     ...task,
+    completedAt: task.completedAt ? task.completedAt.toISOString() : null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),
   };
+}
+
+// La date de fin est posée quand la tâche passe en "à valider" (TO_TEST) ou
+// "terminé" (DONE), conservée tant qu'elle y reste, et effacée si elle revient
+// en amont.
+function resolveCompletedAt(
+  status: z.infer<typeof statusSchema>,
+  existing: string | null,
+): string | null {
+  if (status === "TO_TEST" || status === "DONE") {
+    return existing ?? new Date().toISOString();
+  }
+  return null;
 }
 
 function serializeProject(project: TodoProject): TodoProjectView {
@@ -298,6 +316,7 @@ export async function createTodoTaskAction(input: unknown) {
       description: parsed.data.description || null,
       status: parsed.data.status,
       order,
+      completed_at: resolveCompletedAt(parsed.data.status, null),
     })
     .select("*")
     .single();
@@ -346,6 +365,10 @@ export async function updateTodoTaskAction(id: string, input: unknown) {
       description: parsed.data.description || null,
       status: parsed.data.status,
       order,
+      completed_at: resolveCompletedAt(
+        parsed.data.status,
+        (existing.completed_at as string | null) ?? null,
+      ),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -400,6 +423,10 @@ export async function advanceTodoTaskAction(id: string) {
     .update({
       status: nextStatus,
       order,
+      completed_at: resolveCompletedAt(
+        nextStatus,
+        (existing.completed_at as string | null) ?? null,
+      ),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -420,6 +447,22 @@ export async function reorderTodoTasksAction(input: unknown) {
   }
 
   const supabase = await getSupabaseDb();
+  const { data: existingRows, error: existingError } = await supabase
+    .from("todo_task")
+    .select("id, completed_at")
+    .eq("user_id", user.id)
+    .in(
+      "id",
+      parsed.data.map((item) => item.id),
+    );
+  if (existingError) throw existingError;
+  const completedById = new Map(
+    (existingRows ?? []).map((row) => [
+      row.id as string,
+      (row.completed_at as string | null) ?? null,
+    ]),
+  );
+
   const touchedProjectIds = new Set<string>();
   for (const item of parsed.data) {
     const { data, error } = await supabase
@@ -427,6 +470,10 @@ export async function reorderTodoTasksAction(input: unknown) {
       .update({
         status: item.status,
         order: item.order,
+        completed_at: resolveCompletedAt(
+          item.status,
+          completedById.get(item.id) ?? null,
+        ),
         updated_at: new Date().toISOString(),
       })
       .eq("id", item.id)
