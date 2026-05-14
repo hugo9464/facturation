@@ -30,6 +30,12 @@ export const TODO_PROMPT_PLACEHOLDERS = [
   { token: "{{project}}", label: "Nom du projet" },
   { token: "{{status}}", label: "Statut actuel" },
   { token: "{{description}}", label: "Description / contexte de la tâche" },
+  { token: "{{appUrl}}", label: "URL de base de l'app" },
+  { token: "{{taskId}}", label: "Identifiant interne de la tâche" },
+  {
+    token: "{{previewToken}}",
+    label: "Jeton pour enregistrer les liens de déploiement",
+  },
 ] as const;
 
 export const DEFAULT_TODO_PROMPT_TEMPLATE = `Implémente la tâche UC-{{number}}: {{title}}
@@ -45,7 +51,21 @@ Consignes:
 - Implémente la tâche en respectant les conventions du projet.
 - Garde les changements ciblés sur cette tâche.
 - Ajoute ou adapte les tests pertinents si le changement le justifie.
-- Vérifie avec les commandes de lint/build/test disponibles.`;
+- Vérifie avec les commandes de lint/build/test disponibles.
+
+Déploiement:
+- Crée une branche dédiée et ouvre une Pull Request avec tes changements.
+- Récupère l'URL de preview Vercel générée automatiquement pour cette PR.
+- Enregistre les liens sur la tâche en exécutant cette commande (remplace les
+  deux URLs par les vraies valeurs) :
+
+  curl -X POST "{{appUrl}}/api/todo/tasks/{{taskId}}/preview" \\
+    -H "Authorization: Bearer {{previewToken}}" \\
+    -H "Content-Type: application/json" \\
+    -d '{"previewUrl": "<URL_PREVIEW_VERCEL>", "prUrl": "<URL_PULL_REQUEST>"}'
+
+- Termine ta réponse en donnant le lien de la Pull Request et le lien de
+  preview Vercel.`;
 
 export function renderTodoPrompt(
   template: string,
@@ -55,6 +75,9 @@ export function renderTodoPrompt(
     project: string;
     status: string;
     description: string;
+    appUrl: string;
+    taskId: string;
+    previewToken: string;
   },
 ): string {
   return template
@@ -62,7 +85,10 @@ export function renderTodoPrompt(
     .replaceAll("{{title}}", vars.title)
     .replaceAll("{{project}}", vars.project)
     .replaceAll("{{status}}", vars.status)
-    .replaceAll("{{description}}", vars.description);
+    .replaceAll("{{description}}", vars.description)
+    .replaceAll("{{appUrl}}", vars.appUrl)
+    .replaceAll("{{taskId}}", vars.taskId)
+    .replaceAll("{{previewToken}}", vars.previewToken);
 }
 
 export function nextTodoStatus(status: TodoStatus): TodoStatus | null {

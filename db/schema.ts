@@ -183,6 +183,8 @@ export type TodoTask = {
   description: string | null;
   status: TodoStatus;
   order: number;
+  previewUrl: string | null;
+  prUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
 };

@@ -9,12 +9,14 @@ import {
 } from "@/lib/supabase/db";
 import type { TodoProject, TodoTask } from "@/db/schema";
 import { DEFAULT_TODO_PROMPT_TEMPLATE } from "@/lib/todo";
+import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
 
 function serializeTask(task: TodoTask): TodoTaskView {
   return {
     ...task,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+    previewToken: previewTokenFor(task.id),
   };
 }
 
@@ -62,12 +64,14 @@ export default async function TodoPage() {
   const profile = await getProfile(user.id);
   const promptTemplate =
     profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
+  const appUrl = await getAppUrl();
 
   return (
     <TodoWorkspace
       initialProjects={projects.map(serializeProject)}
       initialTasks={tasks.map(serializeTask)}
       promptTemplate={promptTemplate}
+      appUrl={appUrl}
     />
   );
 }

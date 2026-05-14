@@ -38,6 +38,7 @@ import {
   toTodoTask,
 } from "@/lib/supabase/db";
 import { DEFAULT_TODO_PROMPT_TEMPLATE } from "@/lib/todo";
+import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
 
 const INVOICE_STATUS = {
   DRAFT: "Brouillon",
@@ -68,6 +69,7 @@ function serializeTask(task: TodoTask): TodoTaskView {
     ...task,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+    previewToken: previewTokenFor(task.id),
   };
 }
 
@@ -221,6 +223,7 @@ async function ProjectTasks({
   const profile = await getProfile(userId);
   const promptTemplate =
     profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
+  const appUrl = await getAppUrl();
 
   return (
     <TodoWorkspace
@@ -228,6 +231,7 @@ async function ProjectTasks({
       initialProjects={[serializeProject(project)]}
       initialTasks={taskRows.map(serializeTask)}
       promptTemplate={promptTemplate}
+      appUrl={appUrl}
     />
   );
 }

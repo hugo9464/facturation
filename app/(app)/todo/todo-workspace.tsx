@@ -24,6 +24,8 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ExternalLink,
+  GitPullRequest,
   GripVertical,
   Plus,
   Sparkles,
@@ -207,6 +209,7 @@ function appendToStatus(
 
 function buildImplementationPrompt(
   template: string,
+  appUrl: string,
   task: TodoTaskView,
   project?: TodoProjectView,
 ) {
@@ -217,6 +220,9 @@ function buildImplementationPrompt(
     project: project?.name ?? "Projet non précisé",
     status: TODO_STATUS_LABELS[task.status],
     description: description ? description : "Aucune description fournie.",
+    appUrl,
+    taskId: task.id,
+    previewToken: task.previewToken ?? "",
   });
 }
 
@@ -224,10 +230,12 @@ export function TodoWorkspace({
   initialProjects,
   initialTasks,
   promptTemplate,
+  appUrl,
 }: {
   initialProjects: TodoProjectView[];
   initialTasks: TodoTaskView[];
   promptTemplate: string;
+  appUrl: string;
 }) {
   const [projects, setProjects] = useState(initialProjects);
   const [tasks, setTasks] = useState(() => normalizeOrders(initialTasks));
@@ -444,7 +452,12 @@ export function TodoWorkspace({
 
   async function copyTaskPrompt(task: TodoTaskView) {
     const project = projects.find((item) => item.id === task.projectId);
-    const prompt = buildImplementationPrompt(promptTemplate, task, project);
+    const prompt = buildImplementationPrompt(
+      promptTemplate,
+      appUrl,
+      task,
+      project,
+    );
     try {
       await window.navigator.clipboard.writeText(prompt);
       toast.success("Prompt copié");
@@ -990,9 +1003,37 @@ function SortableLinearTaskRow({
       <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89]">
         UC-{task.number}
       </span>
-      <span className="min-w-0 truncate px-1.5 text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
-        {task.title}
-      </span>
+      <div className="flex min-w-0 items-center gap-1.5 px-1.5">
+        <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
+          {task.title}
+        </span>
+        {task.prUrl ? (
+          <a
+            href={task.prUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
+            aria-label="Ouvrir la Pull Request"
+            title="Ouvrir la Pull Request"
+          >
+            <GitPullRequest className="size-3.5 stroke-[1.9]" />
+          </a>
+        ) : null}
+        {task.previewUrl ? (
+          <a
+            href={task.previewUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-emerald-300"
+            aria-label="Ouvrir la preview Vercel"
+            title="Ouvrir la preview Vercel"
+          >
+            <ExternalLink className="size-3.5 stroke-[1.9]" />
+          </a>
+        ) : null}
+      </div>
       <button
         type="button"
         className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40"

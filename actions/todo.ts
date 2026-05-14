@@ -16,6 +16,7 @@ import {
 import { requireUser } from "@/lib/auth";
 import { nextTodoStatus, TODO_STATUS_LABELS } from "@/lib/todo";
 import { generateText, TASK_SUMMARY_MODEL } from "@/lib/anthropic";
+import { previewTokenFor } from "@/lib/todo-preview";
 
 const statusSchema = z.enum(todoStatusEnum.enumValues);
 const projectIdSchema = z.string().uuid();
@@ -49,6 +50,7 @@ const reorderSchema = z.array(
 export type TodoTaskView = Omit<TodoTask, "createdAt" | "updatedAt"> & {
   createdAt: string;
   updatedAt: string;
+  previewToken: string | null;
 };
 
 export type TodoProjectView = Omit<TodoProject, "createdAt" | "updatedAt"> & {
@@ -61,6 +63,7 @@ function serializeTask(task: TodoTask): TodoTaskView {
     ...task,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+    previewToken: previewTokenFor(task.id),
   };
 }
 
