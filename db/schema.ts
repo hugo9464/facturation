@@ -40,6 +40,7 @@ export type Profile = {
   nextTaskNumber: number;
   legalMentionExtra: string | null;
   rcsExempt: boolean;
+  todoPromptTemplate: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
