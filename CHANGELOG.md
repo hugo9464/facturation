@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0] - 2026-05-14
+
+### Features
+- feat: liens de déploiement sur les tâches todo — le prompt copié demande d'ouvrir une PR et d'enregistrer le lien de preview Vercel ; route API `POST /api/todo/tasks/[id]/preview` (auth par jeton HMAC par tâche) ; les liens PR/preview s'affichent en boutons sur la tâche
+- feat: résumé IA des tâches d'un projet via Haiku, limité aux tâches « À valider »
+- feat: dark mode en gris foncé avec primary indigo
+
+### Refactor
+- refactor: migration des clients Supabase vers les clés publishable/secret (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`)
+
+### Database
+- migration 20260514000000: colonnes `preview_url` / `pr_url` sur `todo_task` (appliquée via Supabase CLI)
+
 ## [0.2.1] - 2026-05-14
 
 ### Chore
