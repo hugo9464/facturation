@@ -663,16 +663,14 @@ function TaskSummaryDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const sortedTasks = useMemo(
-    () => [...tasks].sort((a, b) => a.number - b.number),
+    () =>
+      tasks
+        .filter((task) => task.status === "TO_TEST")
+        .sort((a, b) => a.number - b.number),
     [tasks],
   );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        sortedTasks
-          .filter((task) => task.status === "DONE")
-          .map((task) => task.id),
-      ),
+    () => new Set(sortedTasks.map((task) => task.id)),
   );
   const [summary, setSummary] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -719,15 +717,15 @@ function TaskSummaryDialog({
         <DialogHeader>
           <DialogTitle>Résumé des tâches</DialogTitle>
           <DialogDescription>
-            Sélectionne les tâches à inclure, l&apos;IA rédige le résumé des
-            modifications effectuées.
+            Tâches « À valider » du projet — sélectionne celles à inclure,
+            l&apos;IA rédige le résumé des modifications effectuées.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border p-1">
             {sortedTasks.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                Aucune tâche dans ce projet.
+                Aucune tâche « À valider » dans ce projet.
               </p>
             ) : (
               sortedTasks.map((task) => (
