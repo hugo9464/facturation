@@ -14,7 +14,8 @@ import {
   type TodoTask,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
-import { nextTodoStatus } from "@/lib/todo";
+import { nextTodoStatus, TODO_STATUS_LABELS } from "@/lib/todo";
+import { generateText, TASK_SUMMARY_MODEL } from "@/lib/anthropic";
 
 const statusSchema = z.enum(todoStatusEnum.enumValues);
 const projectIdSchema = z.string().uuid();
@@ -438,4 +439,62 @@ export async function reorderTodoTasksAction(input: unknown) {
     revalidatePath(`/projects/${projectId}`);
   }
   return { success: true };
+}
+
+const summarizeSchema = z.object({
+  taskIds: z
+    .array(z.string().uuid())
+    .min(1, "Sélectionne au moins une tâche")
+    .max(100, "Trop de tâches sélectionnées"),
+});
+
+export async function summarizeTodoTasksAction(input: unknown) {
+  const user = await requireUser();
+  const parsed = summarizeSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("user_id", user.id)
+    .in("id", parsed.data.taskIds);
+  if (error) throw error;
+
+  const tasks = (data ?? []).map(toTodoTask).sort((a, b) => a.number - b.number);
+  if (tasks.length === 0) return { error: "Aucune tâche trouvée" };
+
+  const taskList = tasks
+    .map((task) => {
+      const description = task.description?.trim();
+      return `- UC-${task.number} — ${task.title} [${TODO_STATUS_LABELS[task.status]}]${
+        description ? `\n  ${description}` : ""
+      }`;
+    })
+    .join("\n");
+
+  try {
+    const summary = await generateText({
+      model: TASK_SUMMARY_MODEL,
+      system:
+        "Tu es un assistant qui rédige des résumés de travail clairs et concis en français pour un développeur freelance.",
+      prompt: `Voici une liste de tâches réalisées sur un projet. Rédige un résumé synthétique des modifications effectuées, destiné à être communiqué à un client.
+
+Commence ta réponse exactement par "Voilà le résumé des modifications effectuées :" puis présente les tâches sous forme de liste à puces, reformulées de manière professionnelle et lisible. Pas de jargon technique inutile, pas de numéros "UC-". Reste factuel : ne rajoute rien qui ne soit pas dans la liste.
+
+Tâches :
+${taskList}`,
+      maxTokens: 1024,
+    });
+    return { summary };
+  } catch (err) {
+    return {
+      error:
+        err instanceof Error
+          ? err.message
+          : "Échec de la génération du résumé",
+    };
+  }
 }

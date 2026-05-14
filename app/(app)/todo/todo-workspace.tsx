@@ -26,6 +26,7 @@ import {
   Copy,
   GripVertical,
   Plus,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -37,12 +38,14 @@ import {
   deleteTodoProjectAction,
   deleteTodoTaskAction,
   reorderTodoTasksAction,
+  summarizeTodoTasksAction,
   updateTodoProjectAction,
   updateTodoTaskAction,
   type TodoProjectView,
   type TodoTaskView,
 } from "@/actions/todo";
 import type { TodoStatus } from "@/db/schema";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -241,6 +244,7 @@ export function TodoWorkspace({
   const [projectToDelete, setProjectToDelete] =
     useState<TodoProjectView | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<TodoTaskView | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [isPending, startTransition] = useTransition();
 
@@ -550,6 +554,16 @@ export function TodoWorkspace({
         </div>
       ) : (
         <div className="mx-auto min-w-0 max-w-[1680px]">
+            <div className="mb-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSummaryOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+              >
+                <Sparkles className="size-4" />
+                Résumé IA
+              </button>
+            </div>
             <DndContext
               sensors={sensors}
               collisionDetection={closestCorners}
@@ -629,7 +643,151 @@ export function TodoWorkspace({
           if (taskToDelete) deleteTask(taskToDelete);
         }}
       />
+      <TaskSummaryDialog
+        key={summaryOpen ? "summary-open" : "summary-closed"}
+        open={summaryOpen}
+        tasks={activeTasks}
+        onOpenChange={setSummaryOpen}
+      />
     </div>
+  );
+}
+
+function TaskSummaryDialog({
+  open,
+  tasks,
+  onOpenChange,
+}: {
+  open: boolean;
+  tasks: TodoTaskView[];
+  onOpenChange: (open: boolean) => void;
+}) {
+  const sortedTasks = useMemo(
+    () => [...tasks].sort((a, b) => a.number - b.number),
+    [tasks],
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        sortedTasks
+          .filter((task) => task.status === "DONE")
+          .map((task) => task.id),
+      ),
+  );
+  const [summary, setSummary] = useState("");
+  const [generating, setGenerating] = useState(false);
+
+  function toggle(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function generate() {
+    if (selectedIds.size === 0) {
+      toast.error("Sélectionne au moins une tâche");
+      return;
+    }
+    setGenerating(true);
+    setSummary("");
+    const result = await summarizeTodoTasksAction({
+      taskIds: Array.from(selectedIds),
+    });
+    setGenerating(false);
+    if ("error" in result && result.error) {
+      toast.error(result.error);
+      return;
+    }
+    if ("summary" in result && result.summary) setSummary(result.summary);
+  }
+
+  async function copySummary() {
+    try {
+      await window.navigator.clipboard.writeText(summary);
+      toast.success("Résumé copié");
+    } catch {
+      toast.error("Impossible de copier le résumé");
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Résumé des tâches</DialogTitle>
+          <DialogDescription>
+            Sélectionne les tâches à inclure, l&apos;IA rédige le résumé des
+            modifications effectuées.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-md border p-1">
+            {sortedTasks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Aucune tâche dans ce projet.
+              </p>
+            ) : (
+              sortedTasks.map((task) => (
+                <label
+                  key={task.id}
+                  className="flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                >
+                  <Checkbox
+                    checked={selectedIds.has(task.id)}
+                    onCheckedChange={() => toggle(task.id)}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0 flex-1 text-sm">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      UC-{task.number}
+                    </span>{" "}
+                    {task.title}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {TODO_STATUS_LABELS[task.status]}
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          {summary && (
+            <div className="space-y-2">
+              <Textarea
+                readOnly
+                rows={9}
+                value={summary}
+                className="text-sm"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={copySummary}
+              >
+                <Copy className="size-4" />
+                Copier le résumé
+              </Button>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <span className="mr-auto self-center text-xs text-muted-foreground">
+            {selectedIds.size} tâche{selectedIds.size > 1 ? "s" : ""}{" "}
+            sélectionnée{selectedIds.size > 1 ? "s" : ""}
+          </span>
+          <Button
+            type="button"
+            onClick={generate}
+            disabled={generating || selectedIds.size === 0}
+          >
+            {generating ? "Génération..." : "Générer le résumé"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
