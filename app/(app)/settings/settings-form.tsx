@@ -15,6 +15,10 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { upsertProfileAction } from "@/actions/profile";
 import type { Profile } from "@/db/schema";
+import {
+  DEFAULT_TODO_PROMPT_TEMPLATE,
+  TODO_PROMPT_PLACEHOLDERS,
+} from "@/lib/todo";
 
 export function SettingsForm({
   initial,
@@ -162,6 +166,39 @@ export function SettingsForm({
               placeholder="Ex: Assurance RC pro souscrite chez …"
             />
           </div>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground">
+          Prompt d&apos;implémentation (To-do)
+        </h2>
+        <div className="space-y-2">
+          <Label htmlFor="todo_prompt_template">
+            Modèle de prompt copié depuis une tâche
+          </Label>
+          <Textarea
+            id="todo_prompt_template"
+            name="todo_prompt_template"
+            defaultValue={
+              initial?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE
+            }
+            rows={14}
+            className="font-mono text-xs"
+          />
+          <p className="text-xs text-muted-foreground">
+            Variables disponibles :{" "}
+            {TODO_PROMPT_PLACEHOLDERS.map((placeholder, index) => (
+              <span key={placeholder.token}>
+                {index > 0 && ", "}
+                <code className="rounded bg-muted px-1 py-0.5">
+                  {placeholder.token}
+                </code>{" "}
+                ({placeholder.label})
+              </span>
+            ))}
+            . Laisse vide pour revenir au modèle par défaut.
+          </p>
         </div>
       </section>
 
