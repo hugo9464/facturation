@@ -74,6 +74,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   nextTodoStatus,
+  renderTodoPrompt,
   TODO_STATUSES,
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
@@ -201,32 +202,29 @@ function appendToStatus(
   ]);
 }
 
-function buildImplementationPrompt(task: TodoTaskView, project?: TodoProjectView) {
+function buildImplementationPrompt(
+  template: string,
+  task: TodoTaskView,
+  project?: TodoProjectView,
+) {
   const description = task.description?.trim();
-  return [
-    `Implémente la tâche UC-${task.number}: ${task.title}`,
-    "",
-    `Projet: ${project?.name ?? "Projet non précisé"}`,
-    `Statut actuel: ${TODO_STATUS_LABELS[task.status]}`,
-    "",
-    "Contexte de la tâche:",
-    description ? description : "Aucune description fournie.",
-    "",
-    "Consignes:",
-    "- Analyse le code existant avant de modifier quoi que ce soit.",
-    "- Implémente la tâche en respectant les conventions du projet.",
-    "- Garde les changements ciblés sur cette tâche.",
-    "- Ajoute ou adapte les tests pertinents si le changement le justifie.",
-    "- Vérifie avec les commandes de lint/build/test disponibles.",
-  ].join("\n");
+  return renderTodoPrompt(template, {
+    number: task.number,
+    title: task.title,
+    project: project?.name ?? "Projet non précisé",
+    status: TODO_STATUS_LABELS[task.status],
+    description: description ? description : "Aucune description fournie.",
+  });
 }
 
 export function TodoWorkspace({
   initialProjects,
   initialTasks,
+  promptTemplate,
 }: {
   initialProjects: TodoProjectView[];
   initialTasks: TodoTaskView[];
+  promptTemplate: string;
 }) {
   const [projects, setProjects] = useState(initialProjects);
   const [tasks, setTasks] = useState(() => normalizeOrders(initialTasks));
@@ -442,7 +440,7 @@ export function TodoWorkspace({
 
   async function copyTaskPrompt(task: TodoTaskView) {
     const project = projects.find((item) => item.id === task.projectId);
-    const prompt = buildImplementationPrompt(task, project);
+    const prompt = buildImplementationPrompt(promptTemplate, task, project);
     try {
       await window.navigator.clipboard.writeText(prompt);
       toast.success("Prompt copié");

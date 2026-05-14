@@ -22,6 +22,7 @@ const profileSchema = z.object({
   plafond_type: z.enum(["BNC", "BIC"]),
   legal_mention_extra: z.string().optional(),
   rcs_exempt: z.coerce.boolean().optional(),
+  todo_prompt_template: z.string().optional(),
 });
 
 export async function upsertProfileAction(_prev: unknown, formData: FormData) {
@@ -57,6 +58,7 @@ export async function upsertProfileAction(_prev: unknown, formData: FormData) {
       plafond_type: data.plafond_type,
       legal_mention_extra: data.legal_mention_extra || null,
       rcs_exempt: data.rcs_exempt ?? true,
+      todo_prompt_template: data.todo_prompt_template?.trim() || null,
     });
     if (error) throw error;
   } else {
@@ -74,6 +76,7 @@ export async function upsertProfileAction(_prev: unknown, formData: FormData) {
         plafond_type: data.plafond_type,
         legal_mention_extra: data.legal_mention_extra || null,
         rcs_exempt: data.rcs_exempt ?? true,
+        todo_prompt_template: data.todo_prompt_template?.trim() || null,
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", user.id);

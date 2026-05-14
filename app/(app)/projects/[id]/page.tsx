@@ -28,6 +28,7 @@ import { TodoWorkspace } from "../../todo/todo-workspace";
 import type { TodoProjectView, TodoTaskView } from "@/actions/todo";
 import type { TodoProject, TodoTask } from "@/db/schema";
 import {
+  getProfile,
   getSupabaseDb,
   toClient,
   toInvoice,
@@ -36,6 +37,7 @@ import {
   toTodoProject,
   toTodoTask,
 } from "@/lib/supabase/db";
+import { DEFAULT_TODO_PROMPT_TEMPLATE } from "@/lib/todo";
 
 const INVOICE_STATUS = {
   DRAFT: "Brouillon",
@@ -216,11 +218,16 @@ async function ProjectTasks({
   if (error) throw error;
   const taskRows = (data ?? []).map(toTodoTask);
 
+  const profile = await getProfile(userId);
+  const promptTemplate =
+    profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
+
   return (
     <TodoWorkspace
       key={project.id}
       initialProjects={[serializeProject(project)]}
       initialTasks={taskRows.map(serializeTask)}
+      promptTemplate={promptTemplate}
     />
   );
 }

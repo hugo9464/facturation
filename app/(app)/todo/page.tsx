@@ -1,8 +1,14 @@
 import { requireUser } from "@/lib/auth";
 import { TodoWorkspace } from "./todo-workspace";
 import type { TodoProjectView, TodoTaskView } from "@/actions/todo";
-import { getSupabaseDb, toTodoProject, toTodoTask } from "@/lib/supabase/db";
+import {
+  getProfile,
+  getSupabaseDb,
+  toTodoProject,
+  toTodoTask,
+} from "@/lib/supabase/db";
 import type { TodoProject, TodoTask } from "@/db/schema";
+import { DEFAULT_TODO_PROMPT_TEMPLATE } from "@/lib/todo";
 
 function serializeTask(task: TodoTask): TodoTaskView {
   return {
@@ -53,10 +59,15 @@ export default async function TodoPage() {
   if (tasksError) throw tasksError;
   const tasks = (taskRows ?? []).map(toTodoTask);
 
+  const profile = await getProfile(user.id);
+  const promptTemplate =
+    profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
+
   return (
     <TodoWorkspace
       initialProjects={projects.map(serializeProject)}
       initialTasks={tasks.map(serializeTask)}
+      promptTemplate={promptTemplate}
     />
   );
 }

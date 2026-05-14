@@ -38,6 +38,7 @@ export function toProfile(row: Raw): Profile {
     nextTaskNumber: Number(row.next_task_number),
     legalMentionExtra: (row.legal_mention_extra as string | null) ?? null,
     rcsExempt: Boolean(row.rcs_exempt),
+    todoPromptTemplate: (row.todo_prompt_template as string | null) ?? null,
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };
