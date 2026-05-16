@@ -1228,6 +1228,32 @@ function TodoTaskDialog({
               Date de fin : {formatDate(task.completedAt)}
             </p>
           )}
+          {(task?.prUrl || task?.previewUrl) && (
+            <div className="flex flex-wrap gap-2">
+              {task.prUrl && (
+                <a
+                  href={task.prUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <GitPullRequest className="size-3.5" />
+                  Pull Request
+                </a>
+              )}
+              {task.previewUrl && (
+                <a
+                  href={task.previewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <ExternalLink className="size-3.5" />
+                  Preview Vercel
+                </a>
+              )}
+            </div>
+          )}
           <DialogFooter>
             <Button type="submit" disabled={pending || !title.trim()}>
               {pending ? "Enregistrement..." : "Enregistrer"}
