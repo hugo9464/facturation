@@ -6,6 +6,8 @@ import {
 import {
   shouldMoveTaskToValidationAfterCallback,
   canRequestHermesMerge,
+  extractHermesTestInstructions,
+  getHermesImplementationTestingContract,
   getHermesProgressView,
   isHermesJobActive,
 } from "../lib/todo-implementation-workflow";
@@ -71,6 +73,7 @@ assert.deepEqual(
     tone: "active",
     detail: "Ouverture de la PR",
     steps: ["Clone du dépôt", "Tests en cours", "Ouverture de la PR"],
+    testInstructions: null,
   },
 );
 
@@ -85,7 +88,27 @@ assert.deepEqual(
     tone: "waiting",
     detail: "PR ouverte",
     steps: ["PR ouverte"],
+    testInstructions: null,
   },
+);
+
+assert.match(
+  getHermesImplementationTestingContract().dataset,
+  /jeu de données adéquat/,
+);
+assert.match(
+  getHermesImplementationTestingContract().finalLogs,
+  /Instructions de test/,
+);
+assert.match(
+  getHermesImplementationTestingContract().preview,
+  /page précise/,
+);
+assert.equal(
+  extractHermesTestInstructions(
+    "PR ouverte\nInstructions de test:\n1. Ouvre la preview /todo\n2. Vérifie la tâche UC-42",
+  ),
+  "1. Ouvre la preview /todo\n2. Vérifie la tâche UC-42",
 );
 
 console.log("todo implementation workflow tests passed");

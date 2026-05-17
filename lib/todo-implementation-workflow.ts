@@ -62,6 +62,33 @@ export function parseHermesProgressSteps(logs: string | null | undefined) {
     .slice(-5);
 }
 
+export const HERMES_TESTING_LOG_SECTION = "Instructions de test";
+
+export type HermesImplementationTestingContract = {
+  dataset: string;
+  finalLogs: string;
+  preview: string;
+};
+
+export function getHermesImplementationTestingContract(): HermesImplementationTestingContract {
+  return {
+    dataset:
+      "Avant de finaliser, crée ou documente le jeu de données adéquat pour tester la fonctionnalité dans la preview Vercel. Si la fonctionnalité dépend de données applicatives, prépare des données réalistes et indique leurs noms/valeurs dans les logs finaux.",
+    finalLogs:
+      `Dans le callback final, ajoute une section \"${HERMES_TESTING_LOG_SECTION}\" avec les étapes exactes à exécuter, les données de test créées/à utiliser, le résultat attendu et les limites éventuelles.`,
+    preview:
+      "Fournis un previewUrl pointant vers la page précise à tester dans la preview Vercel (pas seulement la racine) dès qu'elle est disponible.",
+  };
+}
+
+export function extractHermesTestInstructions(logs: string | null | undefined) {
+  if (!logs) return null;
+  const match = logs.match(
+    /(?:^|\n)\s*(?:#{1,6}\s*)?Instructions de test\s*:?\s*\n([\s\S]*)/i,
+  );
+  return match?.[1]?.trim() || null;
+}
+
 export function getHermesProgressView({
   status,
   logs,
@@ -76,5 +103,6 @@ export function getHermesProgressView({
     tone: HERMES_PROGRESS_TONES[status],
     detail: steps.at(-1) ?? HERMES_PROGRESS_LABELS[status],
     steps,
+    testInstructions: extractHermesTestInstructions(logs),
   };
 }

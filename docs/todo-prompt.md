@@ -19,3 +19,5 @@ Gère les états de chargement, erreur simple, mutation en cours et mise à jour
 Vérifie que `/todo` charge, que le CRUD projets et tâches fonctionne, que le changement de vue et le projet sélectionné persistent, que les tâches restent isolées par projet, et que le drag and drop conserve l'ordre.
 
 Important: si tu modifies plus tard les fonctionnalités de cette todo, mets aussi à jour ce prompt de recréation.
+
+Pour les implémentations lancées via Hermes, le payload doit demander explicitement à l'agent de préparer ou documenter le jeu de données adéquat, de renvoyer dans ses logs finaux une section « Instructions de test » avec les étapes et données à utiliser, et de fournir une URL Vercel directe vers la page à valider.

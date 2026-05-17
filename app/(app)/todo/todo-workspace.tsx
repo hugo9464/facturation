@@ -1388,6 +1388,13 @@ function TodoTaskDialog({
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [selectedStatus, setSelectedStatus] = useState<TodoStatus>(status);
+  const testInstructions = task?.implementationJob
+    ? getHermesProgressView({
+        status: task.implementationJob.status,
+        logs: task.implementationJob.logs,
+        updatedAt: task.implementationJob.updatedAt,
+      }).testInstructions
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1471,6 +1478,23 @@ function TodoTaskDialog({
                 >
                   <ExternalLink className="size-3.5" />
                   Preview Vercel
+                </a>
+              )}
+            </div>
+          )}
+          {testInstructions && (
+            <div className="space-y-1 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-muted-foreground">
+              <p className="font-semibold text-emerald-300">Instructions de test Hermes</p>
+              <p className="whitespace-pre-wrap leading-relaxed">{testInstructions}</p>
+              {task?.previewUrl && (
+                <a
+                  href={task.previewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-medium text-emerald-300 underline-offset-4 hover:underline"
+                >
+                  <ExternalLink className="size-3" />
+                  Ouvrir la page de test dans la preview
                 </a>
               )}
             </div>
