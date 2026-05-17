@@ -5,18 +5,27 @@ import { z } from "zod";
 import {
   getProfile,
   getSupabaseDb,
+  toTodoImplementationJob,
   toTodoProject,
   toTodoTask,
 } from "@/lib/supabase/db";
 import {
   todoStatusEnum,
+  type TodoImplementationJob,
   type TodoProject,
   type TodoTask,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { nextTodoStatus, TODO_STATUS_LABELS } from "@/lib/todo";
 import { generateText, TASK_SUMMARY_MODEL } from "@/lib/anthropic";
-import { previewTokenFor } from "@/lib/todo-preview";
+import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
+import {
+  createHermesWebhookHeaders,
+  getHermesWebhookConfig,
+  getImplementationCallbackSecret,
+  IMPLEMENT_TASK_EVENT,
+  implementationCallbackTokenFor,
+} from "@/lib/hermes-automation";
 
 const statusSchema = z.enum(todoStatusEnum.enumValues);
 const projectIdSchema = z.string().uuid();
@@ -24,6 +33,11 @@ const projectIdSchema = z.string().uuid();
 const projectSchema = z.object({
   name: z.string().trim().min(1, "Nom requis").max(80, "Nom trop long"),
   clientId: z.string().uuid().nullable().optional(),
+});
+
+const startImplementationSchema = z.object({
+  taskId: z.string().uuid(),
+  preferredCodingTool: z.enum(["codex", "claude", "hermes"]).default("codex"),
 });
 
 const createSchema = z.object({
@@ -55,6 +69,15 @@ export type TodoTaskView = Omit<
   createdAt: string;
   updatedAt: string;
   previewToken: string | null;
+  implementationJob: TodoImplementationJobView | null;
+};
+
+export type TodoImplementationJobView = Omit<
+  TodoImplementationJob,
+  "createdAt" | "updatedAt"
+> & {
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type TodoProjectView = Omit<TodoProject, "createdAt" | "updatedAt"> & {
@@ -69,6 +92,17 @@ function serializeTask(task: TodoTask): TodoTaskView {
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),
+    implementationJob: null,
+  };
+}
+
+function serializeTodoImplementationJob(
+  job: TodoImplementationJob,
+): TodoImplementationJobView {
+  return {
+    ...job,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
   };
 }
 
@@ -437,6 +471,118 @@ export async function advanceTodoTaskAction(id: string) {
 
   revalidatePath("/todo");
   return { task: serializeTask(toTodoTask(data)) };
+}
+
+export async function startTodoImplementationAction(input: unknown) {
+  const user = await requireUser();
+  const parsed = startImplementationSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const supabase = await getSupabaseDb();
+  const { data: taskRow, error: taskError } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("id", parsed.data.taskId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (taskError) throw taskError;
+  if (!taskRow) return { error: "Tâche introuvable" };
+
+  const task = toTodoTask(taskRow);
+  const project = await getProjectForUser(user.id, task.projectId);
+  if (!project) return { error: "Projet introuvable" };
+
+
+  const hermes = getHermesWebhookConfig();
+  if (!hermes.url || !hermes.secret) {
+    return { error: "Variables HERMES_WEBHOOK_URL/HERMES_WEBHOOK_SECRET manquantes" };
+  }
+
+  const { data: jobRow, error: jobError } = await supabase
+    .from("todo_implementation_job")
+    .insert({
+      user_id: user.id,
+      task_id: task.id,
+      project_id: project.id,
+      status: "QUEUED",
+      agent: "hermes",
+      logs: `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
+    })
+    .select("*")
+    .single();
+  if (jobError) throw jobError;
+
+  const job = toTodoImplementationJob(jobRow);
+  const appUrl = await getAppUrl();
+  const callbackSecret = getImplementationCallbackSecret();
+  const callbackToken = callbackSecret
+    ? implementationCallbackTokenFor(job.id, task.id, callbackSecret)
+    : "";
+
+  const payload = {
+    event_type: IMPLEMENT_TASK_EVENT,
+    jobId: job.id,
+    task: {
+      id: task.id,
+      number: task.number,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+    },
+    project: {
+      id: project.id,
+      name: project.name,
+    },
+    automation: {
+      mode: "hermes",
+      preferredCodingTool: parsed.data.preferredCodingTool,
+      repositoryResolution: "vps_hermes",
+      instructions:
+        "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels.",
+    },
+    callback: {
+      url: `${appUrl}/api/todo/implementation-jobs/${job.id}/callback`,
+      token: callbackToken,
+    },
+  };
+  const body = JSON.stringify(payload);
+
+  try {
+    const response = await fetch(hermes.url, {
+      method: "POST",
+      headers: createHermesWebhookHeaders(body, hermes.secret),
+      body,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`Hermes HTTP ${response.status}: ${text.slice(0, 240)}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Échec appel Hermes";
+    const { data: failedRow } = await supabase
+      .from("todo_implementation_job")
+      .update({
+        status: "FAILED",
+        error_message: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id)
+      .eq("user_id", user.id)
+      .select("*")
+      .single();
+    return {
+      error: message,
+      job: failedRow
+        ? serializeTodoImplementationJob(toTodoImplementationJob(failedRow))
+        : serializeTodoImplementationJob(job),
+    };
+  }
+
+  revalidatePath("/todo");
+  revalidatePath(`/projects/${project.id}`);
+  return { job: serializeTodoImplementationJob(job) };
 }
 
 export async function reorderTodoTasksAction(input: unknown) {

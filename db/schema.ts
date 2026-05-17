@@ -18,10 +18,23 @@ export const todoStatusEnum = {
   enumValues: ["TODO", "IN_PROGRESS", "TO_TEST", "DONE"] as const,
 };
 
+export const todoImplementationJobStatusEnum = {
+  enumValues: [
+    "QUEUED",
+    "RUNNING",
+    "WAITING_PREVIEW",
+    "SUCCEEDED",
+    "FAILED",
+    "CANCELLED",
+  ] as const,
+};
+
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
 export type TodoStatus = (typeof todoStatusEnum.enumValues)[number];
+export type TodoImplementationJobStatus =
+  (typeof todoImplementationJobStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
 
 export type Profile = {
@@ -191,3 +204,24 @@ export type TodoTask = {
 };
 
 export type NewTodoTask = Omit<TodoTask, "id" | "createdAt" | "updatedAt">;
+
+export type TodoImplementationJob = {
+  id: string;
+  userId: string;
+  taskId: string;
+  projectId: string;
+  status: TodoImplementationJobStatus;
+  agent: string;
+  branchName: string | null;
+  prUrl: string | null;
+  previewUrl: string | null;
+  logs: string | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewTodoImplementationJob = Omit<
+  TodoImplementationJob,
+  "id" | "createdAt" | "updatedAt"
+>;

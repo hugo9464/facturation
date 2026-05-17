@@ -25,12 +25,17 @@ import { formatDate } from "@/lib/dates";
 import { rateTypeLabel } from "@/lib/invoice-grouping";
 import { ProjectSettingsForm } from "./project-settings-form";
 import { TodoWorkspace } from "../../todo/todo-workspace";
-import type { TodoProjectView, TodoTaskView } from "@/actions/todo";
-import type { TodoProject, TodoTask } from "@/db/schema";
+import type {
+  TodoImplementationJobView,
+  TodoProjectView,
+  TodoTaskView,
+} from "@/actions/todo";
+import type { TodoImplementationJob, TodoProject, TodoTask } from "@/db/schema";
 import {
   getProfile,
   getSupabaseDb,
   toClient,
+  toTodoImplementationJob,
   toInvoice,
   toQuote,
   toTimeEntry,
@@ -64,13 +69,29 @@ function serializeProject(project: TodoProject): TodoProjectView {
   };
 }
 
-function serializeTask(task: TodoTask): TodoTaskView {
+function serializeTodoImplementationJob(
+  job: TodoImplementationJob,
+): TodoImplementationJobView {
+  return {
+    ...job,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+  };
+}
+
+function serializeTask(
+  task: TodoTask,
+  implementationJob: TodoImplementationJob | null = null,
+): TodoTaskView {
   return {
     ...task,
     completedAt: task.completedAt ? task.completedAt.toISOString() : null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),
+    implementationJob: implementationJob
+      ? serializeTodoImplementationJob(implementationJob)
+      : null,
   };
 }
 
@@ -221,6 +242,18 @@ async function ProjectTasks({
   if (error) throw error;
   const taskRows = (data ?? []).map(toTodoTask);
 
+  const { data: jobRows, error: jobsError } = await supabase
+    .from("todo_implementation_job")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+  if (jobsError) throw jobsError;
+  const latestJobByTaskId = new Map<string, TodoImplementationJob>();
+  for (const job of (jobRows ?? []).map(toTodoImplementationJob)) {
+    if (!latestJobByTaskId.has(job.taskId)) latestJobByTaskId.set(job.taskId, job);
+  }
+
   const profile = await getProfile(userId);
   const promptTemplate =
     profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
@@ -230,7 +263,9 @@ async function ProjectTasks({
     <TodoWorkspace
       key={project.id}
       initialProjects={[serializeProject(project)]}
-      initialTasks={taskRows.map(serializeTask)}
+      initialTasks={taskRows.map((task) =>
+        serializeTask(task, latestJobByTaskId.get(task.id) ?? null),
+      )}
       promptTemplate={promptTemplate}
       appUrl={appUrl}
     />

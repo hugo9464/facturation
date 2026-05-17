@@ -40,6 +40,7 @@ import {
   deleteTodoProjectAction,
   deleteTodoTaskAction,
   reorderTodoTasksAction,
+  startTodoImplementationAction,
   summarizeTodoTasksAction,
   updateTodoProjectAction,
   updateTodoTaskAction,
@@ -89,6 +90,9 @@ import { formatDate } from "@/lib/dates";
 const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
 const PROJECT_STORAGE_KEY = "facturation.todo.project.v1";
 type TodoView = "list" | "kanban";
+type ProjectFormInput = {
+  name: string;
+};
 const TODO_LIST_STATUSES = [
   "TODO",
   "IN_PROGRESS",
@@ -373,7 +377,7 @@ export function TodoWorkspace({
     persistReorder(nextProjectTasks, previous);
   }
 
-  function createProject(input: { name: string }) {
+  function createProject(input: ProjectFormInput) {
     startTransition(async () => {
       const result = await createTodoProjectAction(input);
       if ("error" in result && result.error) {
@@ -389,7 +393,7 @@ export function TodoWorkspace({
     });
   }
 
-  function updateProject(project: TodoProjectView, input: { name: string }) {
+  function updateProject(project: TodoProjectView, input: ProjectFormInput) {
     markPending(project.id, true);
     startTransition(async () => {
       const result = await updateTodoProjectAction(project.id, input);
@@ -465,6 +469,39 @@ export function TodoWorkspace({
     } catch {
       toast.error("Impossible de copier le prompt");
     }
+  }
+
+  function startTaskImplementation(task: TodoTaskView) {
+    markPending(task.id, true);
+    startTransition(async () => {
+      const result = await startTodoImplementationAction({
+        taskId: task.id,
+        preferredCodingTool: "codex",
+      });
+      markPending(task.id, false);
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        if ("job" in result && result.job) {
+          setTasks((current) =>
+            current.map((item) =>
+              item.id === task.id
+                ? { ...item, implementationJob: result.job ?? null }
+                : item,
+            ),
+          );
+        }
+        return;
+      }
+      const job = "job" in result ? result.job : null;
+      if (job) {
+        setTasks((current) =>
+          current.map((item) =>
+            item.id === task.id ? { ...item, implementationJob: job } : item,
+          ),
+        );
+      }
+      toast.success("Job Hermes envoyé");
+    });
   }
 
   function updateTask(
@@ -568,7 +605,16 @@ export function TodoWorkspace({
         </div>
       ) : (
         <div className="mx-auto min-w-0 max-w-[1680px]">
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 flex justify-end gap-2">
+              {activeProject && (
+                <button
+                  type="button"
+                  onClick={() => setProjectDialog({ mode: "edit", project: activeProject })}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+                >
+                  Modifier le projet
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setSummaryOpen(true)}
@@ -591,6 +637,7 @@ export function TodoWorkspace({
                 onDelete={setTaskToDelete}
                 onAdvance={advanceTask}
                 onCopyPrompt={copyTaskPrompt}
+                onStartImplementation={startTaskImplementation}
               />
             </DndContext>
             <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
@@ -814,6 +861,7 @@ type TodoViewProps = {
 
 type TodoLinearViewProps = TodoViewProps & {
   onCopyPrompt: (task: TodoTaskView) => void;
+  onStartImplementation: (task: TodoTaskView) => void;
 };
 
 function TodoLinearListView({
@@ -824,6 +872,7 @@ function TodoLinearListView({
   onDelete,
   onAdvance,
   onCopyPrompt,
+  onStartImplementation,
 }: TodoLinearViewProps) {
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TodoStatus>>(
     () => new Set(["DONE"]),
@@ -853,6 +902,7 @@ function TodoLinearListView({
           onDelete={onDelete}
           onAdvance={onAdvance}
           onCopyPrompt={onCopyPrompt}
+          onStartImplementation={onStartImplementation}
         />
       ))}
     </div>
@@ -870,6 +920,7 @@ function TodoLinearSection({
   onDelete,
   onAdvance,
   onCopyPrompt,
+  onStartImplementation,
 }: Omit<TodoLinearViewProps, "grouped"> & {
   status: TodoStatus;
   tasks: TodoTaskView[];
@@ -933,6 +984,7 @@ function TodoLinearSection({
                   onDelete={onDelete}
                   onAdvance={onAdvance}
                   onCopyPrompt={onCopyPrompt}
+                  onStartImplementation={onStartImplementation}
                 />
               ))
             )}
@@ -950,8 +1002,10 @@ function SortableLinearTaskRow({
   onDelete,
   onAdvance,
   onCopyPrompt,
+  onStartImplementation,
 }: SortableTaskProps & {
   onCopyPrompt: (task: TodoTaskView) => void;
+  onStartImplementation: (task: TodoTaskView) => void;
 }) {
   const {
     attributes,
@@ -984,8 +1038,8 @@ function SortableLinearTaskRow({
         }
       }}
       className={cn(
-        "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
-        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_58px_minmax(0,1fr)_30px_30px_30px] max-sm:px-2",
+        "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
+        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_58px_minmax(0,1fr)_30px_30px_30px_30px] max-sm:px-2",
         isDragging && "relative z-10 shadow-2xl shadow-black/40",
         pending && "opacity-60",
       )}
@@ -1042,6 +1096,21 @@ function SortableLinearTaskRow({
             <ExternalLink className="size-3.5 stroke-[1.9]" />
           </a>
         ) : null}
+        {task.implementationJob ? (
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none",
+              task.implementationJob.status === "FAILED"
+                ? "border-red-500/30 text-red-300"
+                : task.implementationJob.status === "SUCCEEDED"
+                  ? "border-emerald-500/30 text-emerald-300"
+                  : "border-sky-500/30 text-sky-300",
+            )}
+            title={task.implementationJob.errorMessage ?? task.implementationJob.logs ?? "Job Hermes"}
+          >
+            {task.implementationJob.status === "FAILED" ? "Erreur" : "Hermes"}
+          </span>
+        ) : null}
       </div>
       <button
         type="button"
@@ -1055,6 +1124,19 @@ function SortableLinearTaskRow({
         title={nextStatus ? `Passer à ${TODO_STATUS_LABELS[nextStatus]}` : ""}
       >
         <Check className="size-3.5 stroke-[2.2]" />
+      </button>
+      <button
+        type="button"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40"
+        disabled={pending}
+        onClick={(event) => {
+          event.stopPropagation();
+          onStartImplementation(task);
+        }}
+        aria-label="Implémenter avec Hermes"
+        title="Implémenter avec Hermes"
+      >
+        <Sparkles className="size-3.5 stroke-[1.9]" />
       </button>
       <button
         type="button"
@@ -1104,17 +1186,16 @@ function TodoProjectDialog({
   project?: TodoProjectView;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (input: { name: string }) => void;
+  onSubmit: (input: ProjectFormInput) => void;
 }) {
   const [name, setName] = useState(project?.name ?? "");
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{project ? "Renommer le projet" : "Créer un projet"}</DialogTitle>
+          <DialogTitle>{project ? "Configurer le projet" : "Créer un projet"}</DialogTitle>
           <DialogDescription>
-            {project ? "Modifie le nom du projet." : "Ajoute un espace de tâches."}
+            Le nom du projet suffit. Quand tu lances une implémentation, l’app envoie la tâche et le projet à Hermes sur le VPS, qui résout lui-même le dépôt concerné.
           </DialogDescription>
         </DialogHeader>
         <form
