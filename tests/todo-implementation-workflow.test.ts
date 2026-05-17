@@ -9,6 +9,7 @@ import {
   extractHermesTestInstructions,
   getHermesImplementationTestingContract,
   getHermesProgressView,
+  getTodoPullRequestState,
   isHermesJobActive,
   getTodoStatusAfterHermesStart,
 } from "../lib/todo-implementation-workflow";
@@ -121,6 +122,45 @@ assert.equal(
     "PR ouverte\nInstructions de test:\n1. Ouvre la preview /todo\n2. Vérifie la tâche UC-42",
   ),
   "1. Ouvre la preview /todo\n2. Vérifie la tâche UC-42",
+);
+
+assert.equal(
+  getTodoPullRequestState({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "SUCCEEDED",
+    jobAgent: "hermes",
+    prUrl: "https://github.com/acme/app/pull/12",
+    logs: "PR ouverte",
+    errorMessage: null,
+  }),
+  "ready",
+  "a successful implementation PR should be shown as ready to merge",
+);
+
+assert.equal(
+  getTodoPullRequestState({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "FAILED",
+    jobAgent: "hermes-merge",
+    prUrl: "https://github.com/acme/app/pull/12",
+    logs: "mergeStateStatus=DIRTY",
+    errorMessage: "Merge conflict detected",
+  }),
+  "conflict",
+  "a merge-conflicted PR should be shown in red",
+);
+
+assert.equal(
+  getTodoPullRequestState({
+    taskStatus: "TO_TEST",
+    jobStatus: "SUCCEEDED",
+    jobAgent: "hermes-merge",
+    prUrl: "https://github.com/acme/app/pull/12",
+    logs: "PR mergée",
+    errorMessage: null,
+  }),
+  "merged",
+  "a merged PR should be shown in violet",
 );
 
 console.log("todo implementation workflow tests passed");

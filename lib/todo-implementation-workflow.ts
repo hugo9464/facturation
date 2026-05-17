@@ -44,6 +44,51 @@ export function canRequestHermesMerge({
   return taskStatus === "IN_PROGRESS" && jobStatus === "SUCCEEDED" && Boolean(prUrl);
 }
 
+export type TodoPullRequestState = "default" | "ready" | "conflict" | "merged";
+
+const MERGE_CONFLICT_PATTERN =
+  /\b(merge conflict|merge conflicts|conflit(?:s)? de merge|conflit(?:s)? de fusion|mergeStateStatus\s*=\s*DIRTY|mergeable[^\n]*(?:false|null)|cannot be merged|can't automatically merge|not mergeable)\b/i;
+
+export function getTodoPullRequestState({
+  taskStatus,
+  jobStatus,
+  jobAgent,
+  prUrl,
+  logs,
+  errorMessage,
+}: {
+  taskStatus: TodoStatus;
+  jobStatus: TodoImplementationJobStatus | null | undefined;
+  jobAgent: string | null | undefined;
+  prUrl: string | null | undefined;
+  logs: string | null | undefined;
+  errorMessage: string | null | undefined;
+}): TodoPullRequestState {
+  if (!prUrl) return "default";
+
+  if (taskStatus === "TO_TEST" || taskStatus === "DONE") {
+    return "merged";
+  }
+
+  const diagnosticText = `${errorMessage ?? ""}\n${logs ?? ""}`;
+  if (jobStatus === "FAILED" && MERGE_CONFLICT_PATTERN.test(diagnosticText)) {
+    return "conflict";
+  }
+
+  if (
+    canRequestHermesMerge({
+      taskStatus,
+      jobStatus: jobStatus ?? "QUEUED",
+      prUrl,
+    }) &&
+    jobAgent !== HERMES_MERGE_AGENT
+  ) {
+    return "ready";
+  }
+
+  return "default";
+}
+
 export function isHermesJobActive(status: TodoImplementationJobStatus) {
   return status === "QUEUED" || status === "RUNNING" || status === "WAITING_PREVIEW";
 }
