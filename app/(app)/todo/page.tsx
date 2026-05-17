@@ -1,23 +1,44 @@
 import { requireUser } from "@/lib/auth";
 import { TodoWorkspace } from "./todo-workspace";
-import type { TodoProjectView, TodoTaskView } from "@/actions/todo";
+import type {
+  TodoImplementationJobView,
+  TodoProjectView,
+  TodoTaskView,
+} from "@/actions/todo";
 import {
   getProfile,
   getSupabaseDb,
+  toTodoImplementationJob,
   toTodoProject,
   toTodoTask,
 } from "@/lib/supabase/db";
-import type { TodoProject, TodoTask } from "@/db/schema";
+import type { TodoImplementationJob, TodoProject, TodoTask } from "@/db/schema";
 import { DEFAULT_TODO_PROMPT_TEMPLATE } from "@/lib/todo";
 import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
 
-function serializeTask(task: TodoTask): TodoTaskView {
+function serializeTodoImplementationJob(
+  job: TodoImplementationJob,
+): TodoImplementationJobView {
+  return {
+    ...job,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+  };
+}
+
+function serializeTask(
+  task: TodoTask,
+  implementationJob: TodoImplementationJob | null = null,
+): TodoTaskView {
   return {
     ...task,
     completedAt: task.completedAt ? task.completedAt.toISOString() : null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),
+    implementationJob: implementationJob
+      ? serializeTodoImplementationJob(implementationJob)
+      : null,
   };
 }
 
@@ -62,6 +83,17 @@ export default async function TodoPage() {
   if (tasksError) throw tasksError;
   const tasks = (taskRows ?? []).map(toTodoTask);
 
+  const { data: jobRows, error: jobsError } = await supabase
+    .from("todo_implementation_job")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+  if (jobsError) throw jobsError;
+  const latestJobByTaskId = new Map<string, TodoImplementationJob>();
+  for (const job of (jobRows ?? []).map(toTodoImplementationJob)) {
+    if (!latestJobByTaskId.has(job.taskId)) latestJobByTaskId.set(job.taskId, job);
+  }
+
   const profile = await getProfile(user.id);
   const promptTemplate =
     profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
@@ -70,7 +102,9 @@ export default async function TodoPage() {
   return (
     <TodoWorkspace
       initialProjects={projects.map(serializeProject)}
-      initialTasks={tasks.map(serializeTask)}
+      initialTasks={tasks.map((task) =>
+        serializeTask(task, latestJobByTaskId.get(task.id) ?? null),
+      )}
       promptTemplate={promptTemplate}
       appUrl={appUrl}
     />

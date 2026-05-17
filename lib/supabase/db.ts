@@ -8,6 +8,7 @@ import type {
   QuoteLine,
   TimeEntry,
   TodoProject,
+  TodoImplementationJob,
   TodoTask,
 } from "@/db/schema";
 
@@ -166,6 +167,24 @@ export function toTodoProject(row: Raw): TodoProject {
     clientId: (row.client_id as string | null) ?? null,
     name: row.name as string,
     order: Number(row.order),
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
+export function toTodoImplementationJob(row: Raw): TodoImplementationJob {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    taskId: row.task_id as string,
+    projectId: row.project_id as string,
+    status: row.status as TodoImplementationJob["status"],
+    agent: (row.agent as string | null) ?? "hermes",
+    branchName: (row.branch_name as string | null) ?? null,
+    prUrl: (row.pr_url as string | null) ?? null,
+    previewUrl: (row.preview_url as string | null) ?? null,
+    logs: (row.logs as string | null) ?? null,
+    errorMessage: (row.error_message as string | null) ?? null,
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };
