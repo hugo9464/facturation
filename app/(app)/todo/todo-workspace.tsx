@@ -93,7 +93,9 @@ import { cn } from "@/lib/utils";
 import {
   canRequestHermesMerge,
   getHermesProgressView,
+  getTodoPullRequestState,
   isHermesJobActive,
+  type TodoPullRequestState,
 } from "@/lib/todo-implementation-workflow";
 import { formatDate } from "@/lib/dates";
 
@@ -132,6 +134,51 @@ function statusDotClass(status: TodoStatus) {
       return "border-[#5aa2ff] bg-transparent shadow-[0_0_0_2px_rgba(90,162,255,0.16)]";
     case "DONE":
       return "border-[#45d483] bg-[linear-gradient(90deg,#45d483_50%,transparent_50%)]";
+  }
+}
+
+function pullRequestButtonClass(state: TodoPullRequestState, variant: "icon" | "pill") {
+  const base =
+    variant === "icon"
+      ? "grid size-6 shrink-0 place-items-center rounded-full border transition-colors"
+      : "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors";
+
+  switch (state) {
+    case "ready":
+      return cn(
+        base,
+        "border-emerald-500/35 bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200",
+      );
+    case "conflict":
+      return cn(
+        base,
+        "border-red-500/40 bg-red-500/12 text-red-300 hover:bg-red-500/20 hover:text-red-200",
+      );
+    case "merged":
+      return cn(
+        base,
+        "border-violet-500/40 bg-violet-500/12 text-violet-300 hover:bg-violet-500/20 hover:text-violet-200",
+      );
+    case "default":
+      return cn(
+        base,
+        variant === "icon"
+          ? "border-transparent text-[#8d8d99] hover:bg-white/[0.06] hover:text-[#f2f2f4]"
+          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+      );
+  }
+}
+
+function pullRequestButtonTitle(state: TodoPullRequestState) {
+  switch (state) {
+    case "ready":
+      return "Pull Request ouverte — prête à merger";
+    case "conflict":
+      return "Pull Request en conflit de merge";
+    case "merged":
+      return "Pull Request mergée";
+    case "default":
+      return "Ouvrir la Pull Request";
   }
 }
 
@@ -1571,6 +1618,15 @@ function SortableLinearTaskRow({
         updatedAt: task.implementationJob.updatedAt,
       })
     : null;
+  const pullRequestState = getTodoPullRequestState({
+    taskStatus: task.status,
+    jobStatus: task.implementationJob?.status,
+    jobAgent: task.implementationJob?.agent,
+    prUrl: task.prUrl ?? task.implementationJob?.prUrl,
+    logs: task.implementationJob?.logs,
+    errorMessage: task.implementationJob?.errorMessage,
+  });
+  const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1629,9 +1685,9 @@ function SortableLinearTaskRow({
               target="_blank"
               rel="noreferrer"
               onClick={(event) => event.stopPropagation()}
-              className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
-              aria-label="Ouvrir la Pull Request"
-              title="Ouvrir la Pull Request"
+              className={pullRequestButtonClass(pullRequestState, "icon")}
+              aria-label={pullRequestTitle}
+              title={pullRequestTitle}
             >
               <GitPullRequest className="size-3.5 stroke-[1.9]" />
             </a>
@@ -1850,6 +1906,17 @@ function TodoTaskDialog({
         updatedAt: task.implementationJob.updatedAt,
       }).testInstructions
     : null;
+  const pullRequestState = task
+    ? getTodoPullRequestState({
+        taskStatus: task.status,
+        jobStatus: task.implementationJob?.status,
+        jobAgent: task.implementationJob?.agent,
+        prUrl: task.prUrl ?? task.implementationJob?.prUrl,
+        logs: task.implementationJob?.logs,
+        errorMessage: task.implementationJob?.errorMessage,
+      })
+    : "default";
+  const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1918,7 +1985,8 @@ function TodoTaskDialog({
                   href={task.prUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className={pullRequestButtonClass(pullRequestState, "pill")}
+                  title={pullRequestTitle}
                 >
                   <GitPullRequest className="size-3.5" />
                   Pull Request
