@@ -839,32 +839,72 @@ export function TodoWorkspace({
           </Button>
         </div>
       ) : (
-        <div className="mx-auto grid min-w-0 max-w-[1680px] gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <TodoProjectSidebar
-            projects={projects}
-            selectedProjectId={selectedProjectId}
-            taskCounts={taskCounts}
-            pendingIds={pendingIds}
-            onSelectProject={setSelectedProjectId}
-            onCreateProject={() => setProjectDialog({ mode: "create" })}
-            onEditProject={(project) => setProjectDialog({ mode: "edit", project })}
-            onDeleteProject={setProjectToDelete}
-          />
-          <div className="min-w-0">
-            <div className="mb-4 flex justify-end gap-2">
-              {activeProject && (
-                <button
-                  type="button"
-                  onClick={() => setProjectDialog({ mode: "edit", project: activeProject })}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+        <div className="mx-auto min-w-0 max-w-[1680px]">
+          <div className="mb-4 flex flex-col gap-3 rounded-[18px] border border-[#2b2b30] bg-[#1d1d21] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 sm:max-w-sm">
+              <Label className="sr-only" htmlFor="todo-project-select">
+                Projet Todo
+              </Label>
+              <Select
+                value={selectedProjectId}
+                onValueChange={(value) => {
+                  if (value) setSelectedProjectId(value);
+                }}
+              >
+                <SelectTrigger
+                  id="todo-project-select"
+                  className="h-9 border-[#2d2d32] bg-[#17171a] text-[#f2f2f4]"
                 >
-                  Modifier le projet
-                </button>
+                  <SelectValue placeholder="Choisir un projet" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name} ({taskCounts.get(project.id) ?? 0} tâche
+                      {(taskCounts.get(project.id) ?? 0) > 1 ? "s" : ""})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setProjectDialog({ mode: "create" })}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+              >
+                <Plus className="size-4" />
+                Créer un projet
+              </button>
+              {activeProject && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setProjectDialog({ mode: "edit", project: activeProject })}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+                  >
+                    Modifier le projet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProjectToDelete(activeProject)}
+                    disabled={(taskCounts.get(activeProject.id) ?? 0) > 0 || pendingIds.has(activeProject.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={
+                      (taskCounts.get(activeProject.id) ?? 0) > 0
+                        ? "Impossible de supprimer un projet avec des tâches"
+                        : "Supprimer le projet"
+                    }
+                  >
+                    <Trash2 className="size-4" />
+                    Supprimer le projet
+                  </button>
+                </>
               )}
               <button
                 type="button"
                 onClick={() => setEmailImportOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
               >
                 <MailPlus className="size-4" />
                 Importer un email
@@ -872,34 +912,34 @@ export function TodoWorkspace({
               <button
                 type="button"
                 onClick={() => setSummaryOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
               >
                 <Sparkles className="size-4" />
                 Résumé IA
               </button>
             </div>
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCorners}
-              onDragEnd={onDragEnd}
-            >
-              <TodoLinearListView
-                grouped={grouped}
-                pendingIds={pendingIds}
-                onCreate={setCreateStatus}
-                onEdit={setEditingTask}
-                onDelete={setTaskToDelete}
-                onAdvance={advanceTask}
-                onCopyPrompt={copyTaskPrompt}
-                onStartImplementation={(task) => {
-                  if (task.implementationJob) setImplementationDialogTask(task);
-                  else startTaskImplementation(task);
-                }}
-                onValidateImplementation={validateTaskImplementation}
-              />
-            </DndContext>
-            <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
           </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragEnd={onDragEnd}
+          >
+            <TodoLinearListView
+              grouped={grouped}
+              pendingIds={pendingIds}
+              onCreate={setCreateStatus}
+              onEdit={setEditingTask}
+              onDelete={setTaskToDelete}
+              onAdvance={advanceTask}
+              onCopyPrompt={copyTaskPrompt}
+              onStartImplementation={(task) => {
+                if (task.implementationJob) setImplementationDialogTask(task);
+                else startTaskImplementation(task);
+              }}
+              onValidateImplementation={validateTaskImplementation}
+            />
+          </DndContext>
+          <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
         </div>
       )}
 
@@ -1002,107 +1042,6 @@ export function TodoWorkspace({
 }
 
 
-function TodoProjectSidebar({
-  projects,
-  selectedProjectId,
-  taskCounts,
-  pendingIds,
-  onSelectProject,
-  onCreateProject,
-  onEditProject,
-  onDeleteProject,
-}: {
-  projects: TodoProjectView[];
-  selectedProjectId: string;
-  taskCounts: Map<string, number>;
-  pendingIds: Set<string>;
-  onSelectProject: (projectId: string) => void;
-  onCreateProject: () => void;
-  onEditProject: (project: TodoProjectView) => void;
-  onDeleteProject: (project: TodoProjectView) => void;
-}) {
-  return (
-    <aside className="min-w-0 self-start rounded-[24px] border border-[#2b2b30] bg-[#1d1d21] p-3 lg:sticky lg:top-5">
-      <div className="mb-3 flex items-center justify-between px-1">
-        <div>
-          <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#a5a5af]">
-            Projets
-          </h2>
-          <p className="text-[11px] text-[#666671]">Gestion des projets Todo</p>
-        </div>
-        <button
-          type="button"
-          className="grid size-7 shrink-0 place-items-center rounded-full text-[#f2f2f4] transition-colors hover:bg-white/[0.06]"
-          onClick={onCreateProject}
-          aria-label="Créer un projet"
-          title="Créer un projet"
-        >
-          <Plus className="size-4 stroke-[2.2]" />
-        </button>
-      </div>
-      <div className="space-y-1.5">
-        {projects.map((project) => {
-          const isSelected = project.id === selectedProjectId;
-          const isPending = pendingIds.has(project.id);
-          const taskCount = taskCounts.get(project.id) ?? 0;
-
-          return (
-            <div key={project.id} className="group/project relative">
-              <button
-                type="button"
-                onClick={() => onSelectProject(project.id)}
-                className={cn(
-                  "flex w-full min-w-0 items-center gap-2 rounded-2xl border px-3 py-2.5 text-left transition-colors",
-                  isSelected
-                    ? "border-[#3b3b44] bg-[#27272d] text-[#f2f2f4]"
-                    : "border-transparent text-[#d7d7df] hover:bg-[#24242a]",
-                  isPending && "opacity-60",
-                )}
-                aria-current={isSelected ? "page" : undefined}
-              >
-                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#303039] text-[11px] font-semibold uppercase text-[#f2f2f4]">
-                  {project.name.trim().slice(0, 1) || "P"}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="truncate text-sm font-medium leading-tight">
-                    {project.name}
-                  </span>
-                  <span className="mt-1 block text-[11px] leading-none text-[#777780]">
-                    {taskCount} tâche{taskCount > 1 ? "s" : ""}
-                  </span>
-                </span>
-              </button>
-              <div className="absolute right-2 top-2 hidden gap-1 group-hover/project:flex">
-                <button
-                  type="button"
-                  className="rounded-md bg-[#1d1d21]/90 px-1.5 py-1 text-[10px] font-medium text-[#c8c8d1] shadow-sm hover:text-[#f2f2f4]"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onEditProject(project);
-                  }}
-                >
-                  Modifier
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md bg-[#1d1d21]/90 px-1.5 py-1 text-[10px] font-medium text-red-300 shadow-sm hover:text-red-200 disabled:opacity-40"
-                  disabled={taskCount > 0 || isPending}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDeleteProject(project);
-                  }}
-                  title={taskCount > 0 ? "Impossible de supprimer un projet avec des tâches" : "Supprimer"}
-                >
-                  Suppr.
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </aside>
-  );
-}
 
 function EmailTaskImportDialog({
   open,
