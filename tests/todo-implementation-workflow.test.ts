@@ -6,7 +6,10 @@ import {
 import {
   shouldMoveTaskToValidationAfterCallback,
   canRequestHermesMerge,
+  extractHermesTestInstructions,
+  getHermesImplementationTestingContract,
   getHermesProgressView,
+  getTodoPullRequestState,
   isHermesJobActive,
   getTodoStatusAfterHermesStart,
 } from "../lib/todo-implementation-workflow";
@@ -83,6 +86,7 @@ assert.deepEqual(
     tone: "active",
     detail: "Ouverture de la PR",
     steps: ["Clone du dépôt", "Tests en cours", "Ouverture de la PR"],
+    testInstructions: null,
   },
 );
 
@@ -97,7 +101,66 @@ assert.deepEqual(
     tone: "waiting",
     detail: "PR ouverte",
     steps: ["PR ouverte"],
+    testInstructions: null,
   },
+);
+
+assert.match(
+  getHermesImplementationTestingContract().dataset,
+  /jeu de données adéquat/,
+);
+assert.match(
+  getHermesImplementationTestingContract().finalLogs,
+  /Instructions de test/,
+);
+assert.match(
+  getHermesImplementationTestingContract().preview,
+  /page précise/,
+);
+assert.equal(
+  extractHermesTestInstructions(
+    "PR ouverte\nInstructions de test:\n1. Ouvre la preview /todo\n2. Vérifie la tâche UC-42",
+  ),
+  "1. Ouvre la preview /todo\n2. Vérifie la tâche UC-42",
+);
+
+assert.equal(
+  getTodoPullRequestState({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "SUCCEEDED",
+    jobAgent: "hermes",
+    prUrl: "https://github.com/acme/app/pull/12",
+    logs: "PR ouverte",
+    errorMessage: null,
+  }),
+  "ready",
+  "a successful implementation PR should be shown as ready to merge",
+);
+
+assert.equal(
+  getTodoPullRequestState({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "FAILED",
+    jobAgent: "hermes-merge",
+    prUrl: "https://github.com/acme/app/pull/12",
+    logs: "mergeStateStatus=DIRTY",
+    errorMessage: "Merge conflict detected",
+  }),
+  "conflict",
+  "a merge-conflicted PR should be shown in red",
+);
+
+assert.equal(
+  getTodoPullRequestState({
+    taskStatus: "TO_TEST",
+    jobStatus: "SUCCEEDED",
+    jobAgent: "hermes-merge",
+    prUrl: "https://github.com/acme/app/pull/12",
+    logs: "PR mergée",
+    errorMessage: null,
+  }),
+  "merged",
+  "a merged PR should be shown in violet",
 );
 
 console.log("todo implementation workflow tests passed");

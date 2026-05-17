@@ -82,6 +82,7 @@ function serializeTodoImplementationJob(
 function serializeTask(
   task: TodoTask,
   implementationJob: TodoImplementationJob | null = null,
+  implementationJobs: TodoImplementationJob[] = [],
 ): TodoTaskView {
   return {
     ...task,
@@ -92,6 +93,7 @@ function serializeTask(
     implementationJob: implementationJob
       ? serializeTodoImplementationJob(implementationJob)
       : null,
+    implementationJobs: implementationJobs.map(serializeTodoImplementationJob),
   };
 }
 
@@ -250,8 +252,10 @@ async function ProjectTasks({
     .order("created_at", { ascending: false });
   if (jobsError) throw jobsError;
   const latestJobByTaskId = new Map<string, TodoImplementationJob>();
+  const jobsByTaskId = new Map<string, TodoImplementationJob[]>();
   for (const job of (jobRows ?? []).map(toTodoImplementationJob)) {
     if (!latestJobByTaskId.has(job.taskId)) latestJobByTaskId.set(job.taskId, job);
+    jobsByTaskId.set(job.taskId, [...(jobsByTaskId.get(job.taskId) ?? []), job]);
   }
 
   const profile = await getProfile(userId);
@@ -264,7 +268,11 @@ async function ProjectTasks({
       key={project.id}
       initialProjects={[serializeProject(project)]}
       initialTasks={taskRows.map((task) =>
-        serializeTask(task, latestJobByTaskId.get(task.id) ?? null),
+        serializeTask(
+          task,
+          latestJobByTaskId.get(task.id) ?? null,
+          jobsByTaskId.get(task.id) ?? [],
+        ),
       )}
       promptTemplate={promptTemplate}
       appUrl={appUrl}

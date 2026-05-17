@@ -29,6 +29,7 @@ import {
 } from "@/lib/hermes-automation";
 import {
   canRequestHermesMerge,
+  getHermesImplementationTestingContract,
   getTodoStatusAfterHermesStart,
   HERMES_MERGE_AGENT,
 } from "@/lib/todo-implementation-workflow";
@@ -44,6 +45,7 @@ const projectSchema = z.object({
 const startImplementationSchema = z.object({
   taskId: z.string().uuid(),
   preferredCodingTool: z.enum(["codex", "claude", "hermes"]).default("codex"),
+  instructions: z.string().trim().max(4_000, "Instructions trop longues").optional(),
 });
 
 const validateImplementationSchema = z.object({
@@ -99,6 +101,7 @@ export type TodoTaskView = Omit<
   updatedAt: string;
   previewToken: string | null;
   implementationJob: TodoImplementationJobView | null;
+  implementationJobs: TodoImplementationJobView[];
 };
 
 export type TodoImplementationJobView = Omit<
@@ -122,6 +125,7 @@ function serializeTask(task: TodoTask): TodoTaskView {
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),
     implementationJob: null,
+    implementationJobs: [],
   };
 }
 
@@ -742,7 +746,7 @@ export async function startTodoImplementationAction(input: unknown) {
   }
   const project = await getProjectForUser(user.id, task.projectId);
   if (!project) return { error: "Projet introuvable" };
-
+  const extraInstructions = parsed.data.instructions?.trim() || null;
 
   const hermes = getHermesWebhookConfig();
   if (!hermes.url || !hermes.secret) {
@@ -757,7 +761,10 @@ export async function startTodoImplementationAction(input: unknown) {
       project_id: project.id,
       status: "QUEUED",
       agent: "hermes",
-      logs: `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
+      instructions: extraInstructions,
+      logs: extraInstructions
+        ? `Job envoyé à Hermes (${parsed.data.preferredCodingTool}) avec instructions complémentaires.`
+        : `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
     })
     .select("*")
     .single();
@@ -765,6 +772,7 @@ export async function startTodoImplementationAction(input: unknown) {
 
   const job = toTodoImplementationJob(jobRow);
   const appUrl = await getAppUrl();
+  const testingContract = getHermesImplementationTestingContract();
   const callbackSecret = getImplementationCallbackSecret();
   const callbackToken = callbackSecret
     ? implementationCallbackTokenFor(job.id, task.id, callbackSecret)
@@ -779,6 +787,7 @@ export async function startTodoImplementationAction(input: unknown) {
       title: task.title,
       description: task.description,
       status: task.status,
+      additionalInstructions: extraInstructions,
     },
     project: {
       id: project.id,
@@ -788,8 +797,10 @@ export async function startTodoImplementationAction(input: unknown) {
       mode: "hermes",
       preferredCodingTool: parsed.data.preferredCodingTool,
       repositoryResolution: "vps_hermes",
-      instructions:
-        "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels.",
+      instructions: extraInstructions
+        ? `Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider. Consignes complémentaires utilisateur à appliquer à cette itération: ${extraInstructions}`
+        : "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider.",
+      testing: testingContract,
     },
     callback: {
       url: `${appUrl}/api/todo/implementation-jobs/${job.id}/callback`,

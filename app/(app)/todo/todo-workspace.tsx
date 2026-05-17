@@ -28,6 +28,7 @@ import {
   GitPullRequest,
   GripVertical,
   MailPlus,
+  MessageSquarePlus,
   Plus,
   RefreshCw,
   Sparkles,
@@ -93,12 +94,15 @@ import { cn } from "@/lib/utils";
 import {
   canRequestHermesMerge,
   getHermesProgressView,
+  getTodoPullRequestState,
   isHermesJobActive,
+  type TodoPullRequestState,
 } from "@/lib/todo-implementation-workflow";
 import { formatDate } from "@/lib/dates";
 
 const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
 const PROJECT_STORAGE_KEY = "facturation.todo.project.v1";
+const PROJECT_TASK_SEEN_STORAGE_KEY = "facturation.todo.project-task-seen.v1";
 type TodoView = "list" | "kanban";
 type ProjectFormInput = {
   name: string;
@@ -134,6 +138,51 @@ function statusDotClass(status: TodoStatus) {
   }
 }
 
+function pullRequestButtonClass(state: TodoPullRequestState, variant: "icon" | "pill") {
+  const base =
+    variant === "icon"
+      ? "grid size-6 shrink-0 place-items-center rounded-full border transition-colors"
+      : "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors";
+
+  switch (state) {
+    case "ready":
+      return cn(
+        base,
+        "border-emerald-500/35 bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200",
+      );
+    case "conflict":
+      return cn(
+        base,
+        "border-red-500/40 bg-red-500/12 text-red-300 hover:bg-red-500/20 hover:text-red-200",
+      );
+    case "merged":
+      return cn(
+        base,
+        "border-violet-500/40 bg-violet-500/12 text-violet-300 hover:bg-violet-500/20 hover:text-violet-200",
+      );
+    case "default":
+      return cn(
+        base,
+        variant === "icon"
+          ? "border-transparent text-[#8d8d99] hover:bg-white/[0.06] hover:text-[#f2f2f4]"
+          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+      );
+  }
+}
+
+function pullRequestButtonTitle(state: TodoPullRequestState) {
+  switch (state) {
+    case "ready":
+      return "Pull Request ouverte — prête à merger";
+    case "conflict":
+      return "Pull Request en conflit de merge";
+    case "merged":
+      return "Pull Request mergée";
+    case "default":
+      return "Ouvrir la Pull Request";
+  }
+}
+
 function todoListLabel(status: TodoStatus) {
   return TODO_STATUS_LABELS[status].toUpperCase();
 }
@@ -162,6 +211,23 @@ function normalizeOrders(tasks: TodoTaskView[]) {
       grouped[status].map((task, index) => ({ ...task, order: index })),
     );
   });
+}
+
+
+function parseSeenProjectTaskUpdates(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, number] =>
+          typeof entry[1] === "number" && Number.isFinite(entry[1]),
+      ),
+    );
+  } catch {
+    return null;
+  }
 }
 
 function moveTask(
@@ -222,6 +288,21 @@ function appendToStatus(
   ]);
 }
 
+function withImplementationJob(
+  task: TodoTaskView,
+  job: NonNullable<TodoTaskView["implementationJob"]>,
+): TodoTaskView {
+  const history = [
+    job,
+    ...(task.implementationJobs ?? []).filter((item) => item.id !== job.id),
+  ].sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  return { ...task, implementationJob: job, implementationJobs: history };
+}
+
 function buildImplementationPrompt(
   template: string,
   appUrl: string,
@@ -258,6 +339,11 @@ export function TodoWorkspace({
   const [selectedProjectId, setSelectedProjectId] = useState(
     initialProjects[0]?.id ?? "",
   );
+  const [, setSeenProjectTaskUpdates] = useState<
+    Record<string, number>
+  >({});
+  const [seenProjectTaskUpdatesLoaded, setSeenProjectTaskUpdatesLoaded] =
+    useState(false);
   const [createStatus, setCreateStatus] = useState<TodoStatus | null>(null);
   const [editingTask, setEditingTask] = useState<TodoTaskView | null>(null);
   const [projectDialog, setProjectDialog] = useState<{
@@ -267,10 +353,22 @@ export function TodoWorkspace({
   const [projectToDelete, setProjectToDelete] =
     useState<TodoProjectView | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<TodoTaskView | null>(null);
+  const [implementationDialogTask, setImplementationDialogTask] =
+    useState<TodoTaskView | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [emailImportOpen, setEmailImportOpen] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [isPending, startTransition] = useTransition();
+  const projectTaskUpdateTimes = useMemo(() => {
+    const updates = new Map<string, number>();
+    for (const project of projects) updates.set(project.id, 0);
+    for (const task of tasks) {
+      const updatedAt = new Date(task.updatedAt).getTime();
+      if (!Number.isFinite(updatedAt)) continue;
+      updates.set(task.projectId, Math.max(updates.get(task.projectId) ?? 0, updatedAt));
+    }
+    return updates;
+  }, [projects, tasks]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -297,6 +395,43 @@ export function TodoWorkspace({
       window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
     }
   }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (seenProjectTaskUpdatesLoaded) return;
+    const frame = window.requestAnimationFrame(() => {
+      const stored = parseSeenProjectTaskUpdates(
+        window.localStorage.getItem(PROJECT_TASK_SEEN_STORAGE_KEY),
+      );
+      const initialSeen =
+        stored ?? Object.fromEntries(Array.from(projectTaskUpdateTimes.entries()));
+      setSeenProjectTaskUpdates(initialSeen);
+      setSeenProjectTaskUpdatesLoaded(true);
+      if (!stored) {
+        window.localStorage.setItem(
+          PROJECT_TASK_SEEN_STORAGE_KEY,
+          JSON.stringify(initialSeen),
+        );
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [projectTaskUpdateTimes, seenProjectTaskUpdatesLoaded]);
+
+  useEffect(() => {
+    if (!seenProjectTaskUpdatesLoaded || !selectedProjectId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const latest = projectTaskUpdateTimes.get(selectedProjectId) ?? 0;
+      setSeenProjectTaskUpdates((current) => {
+        if ((current[selectedProjectId] ?? 0) >= latest) return current;
+        const next = { ...current, [selectedProjectId]: latest };
+        window.localStorage.setItem(
+          PROJECT_TASK_SEEN_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+        return next;
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [projectTaskUpdateTimes, selectedProjectId, seenProjectTaskUpdatesLoaded]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -359,10 +494,8 @@ export function TodoWorkspace({
             const updatedTask = tasksById.get(task.id);
             const job = jobsByTaskId.get(task.id);
             if (!updatedTask && !job) return task;
-            return {
-              ...(updatedTask ?? task),
-              implementationJob: job ?? updatedTask?.implementationJob ?? task.implementationJob,
-            };
+            const nextTask = updatedTask ?? task;
+            return job ? withImplementationJob(nextTask, job) : nextTask;
           }),
         ),
       );
@@ -529,7 +662,8 @@ export function TodoWorkspace({
     }
   }
 
-  function startTaskImplementation(task: TodoTaskView) {
+  function startTaskImplementation(task: TodoTaskView, instructions?: string) {
+    const cleanedInstructions = instructions?.trim();
     const previous = tasks;
     markPending(task.id, true);
     setTasks((current) => appendToStatus(current, task, "IN_PROGRESS"));
@@ -537,6 +671,7 @@ export function TodoWorkspace({
       const result = await startTodoImplementationAction({
         taskId: task.id,
         preferredCodingTool: "codex",
+        instructions: cleanedInstructions || undefined,
       });
       markPending(task.id, false);
       if ("error" in result && result.error) {
@@ -546,7 +681,9 @@ export function TodoWorkspace({
           setTasks((current) =>
             current.map((item) =>
               item.id === task.id
-                ? { ...item, implementationJob: result.job ?? null }
+                ? result.job
+                  ? withImplementationJob(item, result.job)
+                  : item
                 : item,
             ),
           );
@@ -558,18 +695,15 @@ export function TodoWorkspace({
       if (job || updatedTask) {
         setTasks((current) =>
           normalizeOrders(
-            current.map((item) =>
-              item.id === task.id
-                ? {
-                    ...(updatedTask ?? item),
-                    implementationJob: job ?? updatedTask?.implementationJob ?? item.implementationJob,
-                  }
-                : item,
-            ),
+            current.map((item) => {
+              if (item.id !== task.id) return item;
+              const nextTask = updatedTask ?? item;
+              return job ? withImplementationJob(nextTask, job) : nextTask;
+            }),
           ),
         );
       }
-      toast.success("Job Hermes envoyé");
+      toast.success(cleanedInstructions ? "Instructions envoyées à Hermes" : "Job Hermes envoyé");
     });
   }
 
@@ -584,7 +718,9 @@ export function TodoWorkspace({
           setTasks((current) =>
             current.map((item) =>
               item.id === task.id
-                ? { ...item, implementationJob: result.job ?? null }
+                ? result.job
+                  ? withImplementationJob(item, result.job)
+                  : item
                 : item,
             ),
           );
@@ -595,7 +731,7 @@ export function TodoWorkspace({
       if (job) {
         setTasks((current) =>
           current.map((item) =>
-            item.id === task.id ? { ...item, implementationJob: job } : item,
+            item.id === task.id ? withImplementationJob(item, job) : item,
           ),
         );
       }
@@ -703,7 +839,18 @@ export function TodoWorkspace({
           </Button>
         </div>
       ) : (
-        <div className="mx-auto min-w-0 max-w-[1680px]">
+        <div className="mx-auto grid min-w-0 max-w-[1680px] gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <TodoProjectSidebar
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            taskCounts={taskCounts}
+            pendingIds={pendingIds}
+            onSelectProject={setSelectedProjectId}
+            onCreateProject={() => setProjectDialog({ mode: "create" })}
+            onEditProject={(project) => setProjectDialog({ mode: "edit", project })}
+            onDeleteProject={setProjectToDelete}
+          />
+          <div className="min-w-0">
             <div className="mb-4 flex justify-end gap-2">
               {activeProject && (
                 <button
@@ -744,11 +891,15 @@ export function TodoWorkspace({
                 onDelete={setTaskToDelete}
                 onAdvance={advanceTask}
                 onCopyPrompt={copyTaskPrompt}
-                onStartImplementation={startTaskImplementation}
+                onStartImplementation={(task) => {
+                  if (task.implementationJob) setImplementationDialogTask(task);
+                  else startTaskImplementation(task);
+                }}
                 onValidateImplementation={validateTaskImplementation}
               />
             </DndContext>
             <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
+          </div>
         </div>
       )}
 
@@ -789,6 +940,21 @@ export function TodoWorkspace({
         }}
         onSubmit={(input) => {
           if (editingTask) updateTask(editingTask, input);
+        }}
+      />
+      <TodoImplementationInstructionsDialog
+        key={implementationDialogTask?.id ?? "implementation-instructions-closed"}
+        task={implementationDialogTask}
+        pending={Boolean(
+          implementationDialogTask && pendingIds.has(implementationDialogTask.id),
+        )}
+        onOpenChange={(open) => {
+          if (!open) setImplementationDialogTask(null);
+        }}
+        onSubmit={(instructions) => {
+          if (!implementationDialogTask) return;
+          startTaskImplementation(implementationDialogTask, instructions);
+          setImplementationDialogTask(null);
         }}
       />
       <DeleteProjectDialog
@@ -832,6 +998,109 @@ export function TodoWorkspace({
         onOpenChange={setSummaryOpen}
       />
     </div>
+  );
+}
+
+
+function TodoProjectSidebar({
+  projects,
+  selectedProjectId,
+  taskCounts,
+  pendingIds,
+  onSelectProject,
+  onCreateProject,
+  onEditProject,
+  onDeleteProject,
+}: {
+  projects: TodoProjectView[];
+  selectedProjectId: string;
+  taskCounts: Map<string, number>;
+  pendingIds: Set<string>;
+  onSelectProject: (projectId: string) => void;
+  onCreateProject: () => void;
+  onEditProject: (project: TodoProjectView) => void;
+  onDeleteProject: (project: TodoProjectView) => void;
+}) {
+  return (
+    <aside className="min-w-0 self-start rounded-[24px] border border-[#2b2b30] bg-[#1d1d21] p-3 lg:sticky lg:top-5">
+      <div className="mb-3 flex items-center justify-between px-1">
+        <div>
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#a5a5af]">
+            Projets
+          </h2>
+          <p className="text-[11px] text-[#666671]">Gestion des projets Todo</p>
+        </div>
+        <button
+          type="button"
+          className="grid size-7 shrink-0 place-items-center rounded-full text-[#f2f2f4] transition-colors hover:bg-white/[0.06]"
+          onClick={onCreateProject}
+          aria-label="Créer un projet"
+          title="Créer un projet"
+        >
+          <Plus className="size-4 stroke-[2.2]" />
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {projects.map((project) => {
+          const isSelected = project.id === selectedProjectId;
+          const isPending = pendingIds.has(project.id);
+          const taskCount = taskCounts.get(project.id) ?? 0;
+
+          return (
+            <div key={project.id} className="group/project relative">
+              <button
+                type="button"
+                onClick={() => onSelectProject(project.id)}
+                className={cn(
+                  "flex w-full min-w-0 items-center gap-2 rounded-2xl border px-3 py-2.5 text-left transition-colors",
+                  isSelected
+                    ? "border-[#3b3b44] bg-[#27272d] text-[#f2f2f4]"
+                    : "border-transparent text-[#d7d7df] hover:bg-[#24242a]",
+                  isPending && "opacity-60",
+                )}
+                aria-current={isSelected ? "page" : undefined}
+              >
+                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#303039] text-[11px] font-semibold uppercase text-[#f2f2f4]">
+                  {project.name.trim().slice(0, 1) || "P"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="truncate text-sm font-medium leading-tight">
+                    {project.name}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-none text-[#777780]">
+                    {taskCount} tâche{taskCount > 1 ? "s" : ""}
+                  </span>
+                </span>
+              </button>
+              <div className="absolute right-2 top-2 hidden gap-1 group-hover/project:flex">
+                <button
+                  type="button"
+                  className="rounded-md bg-[#1d1d21]/90 px-1.5 py-1 text-[10px] font-medium text-[#c8c8d1] shadow-sm hover:text-[#f2f2f4]"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onEditProject(project);
+                  }}
+                >
+                  Modifier
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md bg-[#1d1d21]/90 px-1.5 py-1 text-[10px] font-medium text-red-300 shadow-sm hover:text-red-200 disabled:opacity-40"
+                  disabled={taskCount > 0 || isPending}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteProject(project);
+                  }}
+                  title={taskCount > 0 ? "Impossible de supprimer un projet avec des tâches" : "Supprimer"}
+                >
+                  Suppr.
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
@@ -1106,6 +1375,67 @@ function TaskSummaryDialog({
   );
 }
 
+function TodoImplementationInstructionsDialog({
+  task,
+  pending,
+  onOpenChange,
+  onSubmit,
+}: {
+  task: TodoTaskView | null;
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (instructions: string) => void;
+}) {
+  const [instructions, setInstructions] = useState("");
+  const canSubmit = instructions.trim().length > 0;
+
+  return (
+    <Dialog open={task !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Ajouter des instructions à Hermes</DialogTitle>
+          <DialogDescription>
+            {task
+              ? `UC-${task.number} — décris les corrections ou modifications à demander à Hermes.`
+              : "Décris les corrections ou modifications à demander à Hermes."}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSubmit) onSubmit(instructions);
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="todo-hermes-extra-instructions">
+              Instructions complémentaires
+            </Label>
+            <Textarea
+              id="todo-hermes-extra-instructions"
+              rows={6}
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="Ex: Corrige le texte du bouton, garde le même style, ajoute un test..."
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">
+              Un nouveau job Hermes sera lancé avec le contexte de la tâche et ces
+              consignes. Utilisable pendant un job en cours ou après une PR de
+              correction.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={pending || !canSubmit}>
+              {pending ? "Envoi..." : "Envoyer à Hermes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type TodoViewProps = {
   grouped: Record<TodoStatus, TodoTaskView[]>;
   pendingIds: Set<string>;
@@ -1294,6 +1624,15 @@ function SortableLinearTaskRow({
         updatedAt: task.implementationJob.updatedAt,
       })
     : null;
+  const pullRequestState = getTodoPullRequestState({
+    taskStatus: task.status,
+    jobStatus: task.implementationJob?.status,
+    jobAgent: task.implementationJob?.agent,
+    prUrl: task.prUrl ?? task.implementationJob?.prUrl,
+    logs: task.implementationJob?.logs,
+    errorMessage: task.implementationJob?.errorMessage,
+  });
+  const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1352,9 +1691,9 @@ function SortableLinearTaskRow({
               target="_blank"
               rel="noreferrer"
               onClick={(event) => event.stopPropagation()}
-              className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
-              aria-label="Ouvrir la Pull Request"
-              title="Ouvrir la Pull Request"
+              className={pullRequestButtonClass(pullRequestState, "icon")}
+              aria-label={pullRequestTitle}
+              title={pullRequestTitle}
             >
               <GitPullRequest className="size-3.5 stroke-[1.9]" />
             </a>
@@ -1451,10 +1790,22 @@ function SortableLinearTaskRow({
           event.stopPropagation();
           onStartImplementation(task);
         }}
-        aria-label="Implémenter avec Hermes"
-        title="Implémenter avec Hermes"
+        aria-label={
+          task.implementationJob
+            ? "Ajouter des instructions pour Hermes"
+            : "Implémenter avec Hermes"
+        }
+        title={
+          task.implementationJob
+            ? "Ajouter des instructions pour corriger/modifier avec Hermes"
+            : "Implémenter avec Hermes"
+        }
       >
-        <Sparkles className="size-3.5 stroke-[1.9]" />
+        {task.implementationJob ? (
+          <MessageSquarePlus className="size-3.5 stroke-[1.9]" />
+        ) : (
+          <Sparkles className="size-3.5 stroke-[1.9]" />
+        )}
       </button>
       <button
         type="button"
@@ -1566,6 +1917,30 @@ function TodoTaskDialog({
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [selectedStatus, setSelectedStatus] = useState<TodoStatus>(status);
+  const instructionHistory = (task?.implementationJobs ?? [])
+    .filter((job) => job.instructions?.trim())
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  const testInstructions = task?.implementationJob
+    ? getHermesProgressView({
+        status: task.implementationJob.status,
+        logs: task.implementationJob.logs,
+        updatedAt: task.implementationJob.updatedAt,
+      }).testInstructions
+    : null;
+  const pullRequestState = task
+    ? getTodoPullRequestState({
+        taskStatus: task.status,
+        jobStatus: task.implementationJob?.status,
+        jobAgent: task.implementationJob?.agent,
+        prUrl: task.prUrl ?? task.implementationJob?.prUrl,
+        logs: task.implementationJob?.logs,
+        errorMessage: task.implementationJob?.errorMessage,
+      })
+    : "default";
+  const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1634,7 +2009,8 @@ function TodoTaskDialog({
                   href={task.prUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className={pullRequestButtonClass(pullRequestState, "pill")}
+                  title={pullRequestTitle}
                 >
                   <GitPullRequest className="size-3.5" />
                   Pull Request
@@ -1649,6 +2025,56 @@ function TodoTaskDialog({
                 >
                   <ExternalLink className="size-3.5" />
                   Preview Vercel
+                </a>
+              )}
+            </div>
+          )}
+          {task && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Historique des instructions Hermes
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  {instructionHistory.length}
+                </span>
+              </div>
+              {instructionHistory.length > 0 ? (
+                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                  {instructionHistory.map((job) => (
+                    <div
+                      key={job.id}
+                      className="rounded-md border border-border/60 bg-background/60 p-2"
+                    >
+                      <p className="text-[11px] font-medium text-muted-foreground">
+                        {formatDate(job.createdAt)} · {job.status}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+                        {job.instructions ?? ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Aucune instruction complémentaire envoyée à Hermes pour cette tâche.
+                </p>
+              )}
+            </div>
+          )}
+          {testInstructions && (
+            <div className="space-y-1 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-muted-foreground">
+              <p className="font-semibold text-emerald-300">Instructions de test Hermes</p>
+              <p className="whitespace-pre-wrap leading-relaxed">{testInstructions}</p>
+              {task?.previewUrl && (
+                <a
+                  href={task.previewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-medium text-emerald-300 underline-offset-4 hover:underline"
+                >
+                  <ExternalLink className="size-3" />
+                  Ouvrir la page de test dans la preview
                 </a>
               )}
             </div>
