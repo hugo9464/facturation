@@ -28,6 +28,7 @@ import {
   GitPullRequest,
   GripVertical,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -40,6 +41,7 @@ import {
   deleteTodoProjectAction,
   deleteTodoTaskAction,
   reorderTodoTasksAction,
+  refreshTodoImplementationJobsAction,
   startTodoImplementationAction,
   summarizeTodoTasksAction,
   updateTodoProjectAction,
@@ -86,7 +88,11 @@ import {
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
 import { cn } from "@/lib/utils";
-import { canRequestHermesMerge } from "@/lib/todo-implementation-workflow";
+import {
+  canRequestHermesMerge,
+  getHermesProgressView,
+  isHermesJobActive,
+} from "@/lib/todo-implementation-workflow";
 import { formatDate } from "@/lib/dates";
 
 const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
@@ -315,10 +321,49 @@ export function TodoWorkspace({
     }
     return counts;
   }, [tasks]);
+  const activeHermesTaskIds = useMemo(
+    () =>
+      tasks
+        .filter((task) =>
+          task.implementationJob
+            ? isHermesJobActive(task.implementationJob.status)
+            : false,
+        )
+        .map((task) => task.id),
+    [tasks],
+  );
+  const activeHermesTaskKey = activeHermesTaskIds.join("|");
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  useEffect(() => {
+    const taskIds = activeHermesTaskKey.split("|").filter(Boolean);
+    if (taskIds.length === 0) return;
+    let cancelled = false;
+
+    async function refreshActiveHermesJobs() {
+      const result = await refreshTodoImplementationJobsAction({
+        taskIds,
+      });
+      if (cancelled || !("jobs" in result) || !result.jobs) return;
+      const jobsByTaskId = new Map(result.jobs.map((job) => [job.taskId, job]));
+      setTasks((current) =>
+        current.map((task) => {
+          const job = jobsByTaskId.get(task.id);
+          return job ? { ...task, implementationJob: job } : task;
+        }),
+      );
+    }
+
+    void refreshActiveHermesJobs();
+    const interval = window.setInterval(refreshActiveHermesJobs, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeHermesTaskKey]);
 
   function markPending(id: string, pending: boolean) {
     setPendingIds((current) => {
@@ -1064,6 +1109,13 @@ function SortableLinearTaskRow({
     jobStatus: task.implementationJob?.status ?? "QUEUED",
     prUrl: task.prUrl ?? task.implementationJob?.prUrl,
   });
+  const hermesProgress = task.implementationJob
+    ? getHermesProgressView({
+        status: task.implementationJob.status,
+        logs: task.implementationJob.errorMessage ?? task.implementationJob.logs,
+        updatedAt: task.implementationJob.updatedAt,
+      })
+    : null;
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1103,58 +1155,84 @@ function SortableLinearTaskRow({
       <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89]">
         UC-{task.number}
       </span>
-      <div className="flex min-w-0 items-center gap-1.5 px-1.5">
-        <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
-          {task.title}
-        </span>
-        {task.completedAt && (
-          <span
-            className="shrink-0 font-mono text-[11px] leading-none text-[#777780]"
-            title="Date de fin"
-          >
-            {formatDate(task.completedAt)}
+      <div className="min-w-0 px-1.5 py-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
+            {task.title}
           </span>
-        )}
-        {task.prUrl ? (
-          <a
-            href={task.prUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
-            className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
-            aria-label="Ouvrir la Pull Request"
-            title="Ouvrir la Pull Request"
-          >
-            <GitPullRequest className="size-3.5 stroke-[1.9]" />
-          </a>
-        ) : null}
-        {task.previewUrl ? (
-          <a
-            href={task.previewUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
-            className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-emerald-300"
-            aria-label="Ouvrir la preview Vercel"
-            title="Ouvrir la preview Vercel"
-          >
-            <ExternalLink className="size-3.5 stroke-[1.9]" />
-          </a>
-        ) : null}
-        {task.implementationJob ? (
-          <span
+          {task.completedAt && (
+            <span
+              className="shrink-0 font-mono text-[11px] leading-none text-[#777780]"
+              title="Date de fin"
+            >
+              {formatDate(task.completedAt)}
+            </span>
+          )}
+          {task.prUrl ? (
+            <a
+              href={task.prUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
+              aria-label="Ouvrir la Pull Request"
+              title="Ouvrir la Pull Request"
+            >
+              <GitPullRequest className="size-3.5 stroke-[1.9]" />
+            </a>
+          ) : null}
+          {task.previewUrl ? (
+            <a
+              href={task.previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className="grid size-6 shrink-0 place-items-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-emerald-300"
+              aria-label="Ouvrir la preview Vercel"
+              title="Ouvrir la preview Vercel"
+            >
+              <ExternalLink className="size-3.5 stroke-[1.9]" />
+            </a>
+          ) : null}
+          {task.implementationJob && hermesProgress ? (
+            <span
+              className={cn(
+                "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none",
+                hermesProgress.tone === "error"
+                  ? "border-red-500/30 text-red-300"
+                  : hermesProgress.tone === "success"
+                    ? "border-emerald-500/30 text-emerald-300"
+                    : hermesProgress.tone === "waiting"
+                      ? "border-amber-500/30 text-amber-300"
+                      : "border-sky-500/30 text-sky-300",
+              )}
+              title={task.implementationJob.errorMessage ?? task.implementationJob.logs ?? "Job Hermes"}
+            >
+              Hermes · {hermesProgress.label}
+            </span>
+          ) : null}
+        </div>
+        {task.implementationJob && hermesProgress ? (
+          <div
             className={cn(
-              "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none",
-              task.implementationJob.status === "FAILED"
-                ? "border-red-500/30 text-red-300"
-                : task.implementationJob.status === "SUCCEEDED"
-                  ? "border-emerald-500/30 text-emerald-300"
-                  : "border-sky-500/30 text-sky-300",
+              "mt-1 flex min-w-0 items-center gap-1.5 text-[11px] leading-none",
+              hermesProgress.tone === "error"
+                ? "text-red-300"
+                : hermesProgress.tone === "success"
+                  ? "text-emerald-300"
+                  : hermesProgress.tone === "waiting"
+                    ? "text-amber-300"
+                    : "text-sky-300",
             )}
-            title={task.implementationJob.errorMessage ?? task.implementationJob.logs ?? "Job Hermes"}
+            title={hermesProgress.steps.join("\n") || hermesProgress.detail}
           >
-            {task.implementationJob.status === "FAILED" ? "Erreur" : "Hermes"}
-          </span>
+            {isHermesJobActive(task.implementationJob.status) ? (
+              <RefreshCw className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+            ) : null}
+            <span className="shrink-0 font-medium">Avancement Hermes</span>
+            <span className="min-w-0 truncate text-[#b7b7c2]">{hermesProgress.detail}</span>
+            <span className="shrink-0 text-[#777780]">{formatDate(task.implementationJob.updatedAt)}</span>
+          </div>
         ) : null}
       </div>
       <button
