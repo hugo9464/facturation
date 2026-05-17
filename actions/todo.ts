@@ -24,8 +24,13 @@ import {
   getHermesWebhookConfig,
   getImplementationCallbackSecret,
   IMPLEMENT_TASK_EVENT,
+  MERGE_TASK_EVENT,
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
+import {
+  canRequestHermesMerge,
+  HERMES_MERGE_AGENT,
+} from "@/lib/todo-implementation-workflow";
 
 const statusSchema = z.enum(todoStatusEnum.enumValues);
 const projectIdSchema = z.string().uuid();
@@ -38,6 +43,10 @@ const projectSchema = z.object({
 const startImplementationSchema = z.object({
   taskId: z.string().uuid(),
   preferredCodingTool: z.enum(["codex", "claude", "hermes"]).default("codex"),
+});
+
+const validateImplementationSchema = z.object({
+  taskId: z.string().uuid(),
 });
 
 const createSchema = z.object({
@@ -553,6 +562,152 @@ export async function startTodoImplementationAction(input: unknown) {
     const response = await fetch(hermes.url, {
       method: "POST",
       headers: createHermesWebhookHeaders(body, hermes.secret),
+      body,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`Hermes HTTP ${response.status}: ${text.slice(0, 240)}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Échec appel Hermes";
+    const { data: failedRow } = await supabase
+      .from("todo_implementation_job")
+      .update({
+        status: "FAILED",
+        error_message: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id)
+      .eq("user_id", user.id)
+      .select("*")
+      .single();
+    return {
+      error: message,
+      job: failedRow
+        ? serializeTodoImplementationJob(toTodoImplementationJob(failedRow))
+        : serializeTodoImplementationJob(job),
+    };
+  }
+
+  revalidatePath("/todo");
+  revalidatePath(`/projects/${project.id}`);
+  return { job: serializeTodoImplementationJob(job) };
+}
+
+export async function validateTodoImplementationAction(input: unknown) {
+  const user = await requireUser();
+  const parsed = validateImplementationSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const supabase = await getSupabaseDb();
+  const { data: taskRow, error: taskError } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("id", parsed.data.taskId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (taskError) throw taskError;
+  if (!taskRow) return { error: "Tâche introuvable" };
+
+  const task = toTodoTask(taskRow);
+  const project = await getProjectForUser(user.id, task.projectId);
+  if (!project) return { error: "Projet introuvable" };
+
+  const { data: sourceJobRow, error: sourceJobError } = await supabase
+    .from("todo_implementation_job")
+    .select("*")
+    .eq("task_id", task.id)
+    .eq("user_id", user.id)
+    .eq("agent", "hermes")
+    .eq("status", "SUCCEEDED")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (sourceJobError) throw sourceJobError;
+  if (!sourceJobRow) return { error: "Aucune PR Hermes prête à merger" };
+
+  const sourceJob = toTodoImplementationJob(sourceJobRow);
+  if (
+    !canRequestHermesMerge({
+      taskStatus: task.status,
+      jobStatus: sourceJob.status,
+      prUrl: task.prUrl ?? sourceJob.prUrl,
+    })
+  ) {
+    return { error: "Cette tâche n'est pas prête à être validée" };
+  }
+
+  const hermes = getHermesWebhookConfig();
+  if (!hermes.url || !hermes.secret) {
+    return { error: "Variables HERMES_WEBHOOK_URL/HERMES_WEBHOOK_SECRET manquantes" };
+  }
+
+  const { data: jobRow, error: jobError } = await supabase
+    .from("todo_implementation_job")
+    .insert({
+      user_id: user.id,
+      task_id: task.id,
+      project_id: project.id,
+      status: "QUEUED",
+      agent: HERMES_MERGE_AGENT,
+      branch_name: sourceJob.branchName,
+      pr_url: sourceJob.prUrl ?? task.prUrl,
+      preview_url: sourceJob.previewUrl ?? task.previewUrl,
+      logs: "Validation utilisateur envoyée à Hermes pour merge dans main.",
+    })
+    .select("*")
+    .single();
+  if (jobError) throw jobError;
+
+  const job = toTodoImplementationJob(jobRow);
+  const appUrl = await getAppUrl();
+  const callbackSecret = getImplementationCallbackSecret();
+  const callbackToken = callbackSecret
+    ? implementationCallbackTokenFor(job.id, task.id, callbackSecret)
+    : "";
+  const prUrl = sourceJob.prUrl ?? task.prUrl;
+
+  const payload = {
+    event_type: MERGE_TASK_EVENT,
+    jobId: job.id,
+    sourceJobId: sourceJob.id,
+    task: {
+      id: task.id,
+      number: task.number,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      prUrl,
+      previewUrl: sourceJob.previewUrl ?? task.previewUrl,
+    },
+    project: {
+      id: project.id,
+      name: project.name,
+    },
+    automation: {
+      mode: "hermes_merge",
+      repositoryResolution: "vps_hermes",
+      mergeMethod: "squash_or_merge",
+      instructions:
+        "Merge la PR fournie dans la branche main/default du dépôt cible. Ne modifie pas le code. Après merge réussi, callback SUCCEEDED; sinon callback FAILED avec logs.",
+    },
+    pullRequest: {
+      url: prUrl,
+      branchName: sourceJob.branchName,
+    },
+    callback: {
+      url: `${appUrl}/api/todo/implementation-jobs/${job.id}/callback`,
+      token: callbackToken,
+    },
+  };
+  const body = JSON.stringify(payload);
+
+  try {
+    const response = await fetch(hermes.url, {
+      method: "POST",
+      headers: createHermesWebhookHeaders(body, hermes.secret, MERGE_TASK_EVENT),
       body,
     });
     if (!response.ok) {

@@ -1,10 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const IMPLEMENT_TASK_EVENT = "implement_task";
+export const MERGE_TASK_EVENT = "merge_task";
+
+export type HermesTaskEvent = typeof IMPLEMENT_TASK_EVENT | typeof MERGE_TASK_EVENT;
 
 export type HermesWebhookHeaders = {
   "Content-Type": "application/json";
-  "X-GitHub-Event": typeof IMPLEMENT_TASK_EVENT;
+  "X-GitHub-Event": HermesTaskEvent;
   "X-Hub-Signature-256": string;
 };
 
@@ -15,10 +18,11 @@ export function hmacSha256Hex(body: string, secret: string): string {
 export function createHermesWebhookHeaders(
   body: string,
   secret: string,
+  event: HermesTaskEvent = IMPLEMENT_TASK_EVENT,
 ): HermesWebhookHeaders {
   return {
     "Content-Type": "application/json",
-    "X-GitHub-Event": IMPLEMENT_TASK_EVENT,
+    "X-GitHub-Event": event,
     "X-Hub-Signature-256": `sha256=${hmacSha256Hex(body, secret)}`,
   };
 }

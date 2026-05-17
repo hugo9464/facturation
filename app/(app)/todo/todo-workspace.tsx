@@ -44,6 +44,7 @@ import {
   summarizeTodoTasksAction,
   updateTodoProjectAction,
   updateTodoTaskAction,
+  validateTodoImplementationAction,
   type TodoProjectView,
   type TodoTaskView,
 } from "@/actions/todo";
@@ -85,6 +86,7 @@ import {
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
 import { cn } from "@/lib/utils";
+import { canRequestHermesMerge } from "@/lib/todo-implementation-workflow";
 import { formatDate } from "@/lib/dates";
 
 const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
@@ -504,6 +506,36 @@ export function TodoWorkspace({
     });
   }
 
+  function validateTaskImplementation(task: TodoTaskView) {
+    markPending(task.id, true);
+    startTransition(async () => {
+      const result = await validateTodoImplementationAction({ taskId: task.id });
+      markPending(task.id, false);
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        if ("job" in result && result.job) {
+          setTasks((current) =>
+            current.map((item) =>
+              item.id === task.id
+                ? { ...item, implementationJob: result.job ?? null }
+                : item,
+            ),
+          );
+        }
+        return;
+      }
+      const job = "job" in result ? result.job : null;
+      if (job) {
+        setTasks((current) =>
+          current.map((item) =>
+            item.id === task.id ? { ...item, implementationJob: job } : item,
+          ),
+        );
+      }
+      toast.success("Validation envoyée à Hermes");
+    });
+  }
+
   function updateTask(
     task: TodoTaskView,
     input: { title: string; description: string; status: TodoStatus },
@@ -638,6 +670,7 @@ export function TodoWorkspace({
                 onAdvance={advanceTask}
                 onCopyPrompt={copyTaskPrompt}
                 onStartImplementation={startTaskImplementation}
+                onValidateImplementation={validateTaskImplementation}
               />
             </DndContext>
             <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
@@ -862,6 +895,7 @@ type TodoViewProps = {
 type TodoLinearViewProps = TodoViewProps & {
   onCopyPrompt: (task: TodoTaskView) => void;
   onStartImplementation: (task: TodoTaskView) => void;
+  onValidateImplementation: (task: TodoTaskView) => void;
 };
 
 function TodoLinearListView({
@@ -873,6 +907,7 @@ function TodoLinearListView({
   onAdvance,
   onCopyPrompt,
   onStartImplementation,
+  onValidateImplementation,
 }: TodoLinearViewProps) {
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TodoStatus>>(
     () => new Set(["DONE"]),
@@ -903,6 +938,7 @@ function TodoLinearListView({
           onAdvance={onAdvance}
           onCopyPrompt={onCopyPrompt}
           onStartImplementation={onStartImplementation}
+          onValidateImplementation={onValidateImplementation}
         />
       ))}
     </div>
@@ -921,6 +957,7 @@ function TodoLinearSection({
   onAdvance,
   onCopyPrompt,
   onStartImplementation,
+  onValidateImplementation,
 }: Omit<TodoLinearViewProps, "grouped"> & {
   status: TodoStatus;
   tasks: TodoTaskView[];
@@ -985,6 +1022,7 @@ function TodoLinearSection({
                   onAdvance={onAdvance}
                   onCopyPrompt={onCopyPrompt}
                   onStartImplementation={onStartImplementation}
+                  onValidateImplementation={onValidateImplementation}
                 />
               ))
             )}
@@ -1003,9 +1041,11 @@ function SortableLinearTaskRow({
   onAdvance,
   onCopyPrompt,
   onStartImplementation,
+  onValidateImplementation,
 }: SortableTaskProps & {
   onCopyPrompt: (task: TodoTaskView) => void;
   onStartImplementation: (task: TodoTaskView) => void;
+  onValidateImplementation: (task: TodoTaskView) => void;
 }) {
   const {
     attributes,
@@ -1019,6 +1059,11 @@ function SortableLinearTaskRow({
     data: { type: "task", status: task.status },
   });
   const nextStatus = nextTodoStatus(task.status);
+  const canValidate = canRequestHermesMerge({
+    taskStatus: task.status,
+    jobStatus: task.implementationJob?.status ?? "QUEUED",
+    prUrl: task.prUrl ?? task.implementationJob?.prUrl,
+  });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1038,8 +1083,8 @@ function SortableLinearTaskRow({
         }
       }}
       className={cn(
-        "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
-        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_58px_minmax(0,1fr)_30px_30px_30px_30px] max-sm:px-2",
+        "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
+        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_58px_minmax(0,1fr)_30px_30px_30px_30px_30px] max-sm:px-2",
         isDragging && "relative z-10 shadow-2xl shadow-black/40",
         pending && "opacity-60",
       )}
@@ -1122,6 +1167,23 @@ function SortableLinearTaskRow({
         }}
         aria-label="Avancer"
         title={nextStatus ? `Passer à ${TODO_STATUS_LABELS[nextStatus]}` : ""}
+      >
+        <Check className="size-3.5 stroke-[2.2]" />
+      </button>
+      <button
+        type="button"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-40"
+        disabled={!canValidate || pending}
+        onClick={(event) => {
+          event.stopPropagation();
+          onValidateImplementation(task);
+        }}
+        aria-label="Valider et merger avec Hermes"
+        title={
+          canValidate
+            ? "Valider: Hermes merge la PR dans main puis passe la tâche à À valider"
+            : "Validation disponible après réussite du job Hermes et création de PR"
+        }
       >
         <Check className="size-3.5 stroke-[2.2]" />
       </button>

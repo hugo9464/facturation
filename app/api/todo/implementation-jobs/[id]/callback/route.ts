@@ -8,6 +8,7 @@ import {
   getImplementationCallbackSecret,
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
+import { shouldMoveTaskToValidationAfterCallback } from "@/lib/todo-implementation-workflow";
 
 const callbackSchema = z.object({
   taskId: z.string().uuid(),
@@ -79,14 +80,31 @@ export async function POST(
     .eq("id", jobId);
   if (updateError) throw updateError;
 
-  const taskUpdate: Record<string, string> = {
+  const taskUpdate: Record<string, string | number> = {
     updated_at: new Date().toISOString(),
   };
   if (parsed.data.prUrl) taskUpdate.pr_url = parsed.data.prUrl;
   if (parsed.data.previewUrl) taskUpdate.preview_url = parsed.data.previewUrl;
-  if (parsed.data.status === "SUCCEEDED") taskUpdate.status = "TO_TEST";
+  const shouldMoveToValidation = shouldMoveTaskToValidationAfterCallback({
+    jobAgent: job.agent,
+    callbackStatus: parsed.data.status,
+  });
+  if (shouldMoveToValidation) {
+    const { data: lastTaskRows, error: orderError } = await supabase
+      .from("todo_task")
+      .select("order")
+      .eq("user_id", job.userId)
+      .eq("project_id", job.projectId)
+      .eq("status", "TO_TEST")
+      .order("order", { ascending: false })
+      .limit(1);
+    if (orderError) throw orderError;
+    taskUpdate.status = "TO_TEST";
+    taskUpdate.order = ((lastTaskRows?.[0]?.order as number | undefined) ?? -1) + 1;
+    taskUpdate.completed_at = new Date().toISOString();
+  }
 
-  if (Object.keys(taskUpdate).length > 1 || parsed.data.status === "SUCCEEDED") {
+  if (Object.keys(taskUpdate).length > 1 || shouldMoveToValidation) {
     const { error: taskError } = await supabase
       .from("todo_task")
       .update(taskUpdate)
