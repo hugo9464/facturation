@@ -2,9 +2,16 @@ import { type NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
+export function isPublicTodoApiPath(path: string) {
+  return (
+    /^\/api\/todo\/tasks\/[^/]+\/preview$/.test(path) ||
+    /^\/api\/todo\/implementation-jobs\/[^/]+\/callback$/.test(path)
+  );
+}
+
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  if (/^\/api\/todo\/tasks\/[^/]+\/preview$/.test(path)) {
+  if (isPublicTodoApiPath(path)) {
     return NextResponse.next();
   }
 
