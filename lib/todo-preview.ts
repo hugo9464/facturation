@@ -53,3 +53,39 @@ export async function getAppUrl(): Promise<string> {
     (host.startsWith("localhost") ? "http" : "https");
   return `${proto}://${host}`;
 }
+
+export function sanitizePreviewNextPath(value: string | null | undefined): string {
+  if (!value?.trim()) return "/";
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/")) return "/";
+  if (trimmed.startsWith("//")) return "/";
+  try {
+    const parsed = new URL(trimmed, "https://facturation.local");
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
+export function buildPreviewAutoAuthUrl(path: string): string {
+  const next = sanitizePreviewNextPath(path);
+  return `/auth/preview?next=${encodeURIComponent(next)}`;
+}
+
+export function buildPreviewAutoAuthAbsoluteUrl(origin: string, path: string): string {
+  return `${normalizeAppUrl(origin)}${buildPreviewAutoAuthUrl(path)}`;
+}
+
+export function getPreviewAutoLoginCredentials(): {
+  email: string;
+  password: string;
+} | null {
+  const email = process.env.PREVIEW_AUTO_LOGIN_EMAIL?.trim();
+  const password = process.env.PREVIEW_AUTO_LOGIN_PASSWORD;
+  if (!email || !password) return null;
+  return { email, password };
+}
+
+export function isPreviewAutoLoginAllowed(): boolean {
+  return process.env.VERCEL_ENV === "preview";
+}

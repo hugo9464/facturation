@@ -127,7 +127,7 @@ export function getHermesImplementationTestingContract(): HermesImplementationTe
     finalLogs:
       `Dans le callback final, ajoute une section \"${HERMES_TESTING_LOG_SECTION}\" avec les étapes exactes à exécuter, les données de test créées/à utiliser, le résultat attendu et les limites éventuelles.`,
     preview:
-      "Fournis un previewUrl pointant vers la page précise à tester dans la preview Vercel (pas seulement la racine) dès qu'elle est disponible.",
+      "Fournis un previewUrl pointant vers la page précise à tester dans la preview Vercel (pas seulement la racine) dès qu'elle est disponible. Si cette page est protégée par authentification, utilise /auth/preview?next=<chemin-encodé> sur le domaine de preview afin que l'utilisateur soit connecté automatiquement au compte de test avant la redirection vers la page.",
   };
 }
 
