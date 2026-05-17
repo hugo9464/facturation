@@ -27,6 +27,7 @@ import {
   ExternalLink,
   GitPullRequest,
   GripVertical,
+  MessageSquarePlus,
   Plus,
   RefreshCw,
   Sparkles,
@@ -265,6 +266,8 @@ export function TodoWorkspace({
   const [projectToDelete, setProjectToDelete] =
     useState<TodoProjectView | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<TodoTaskView | null>(null);
+  const [implementationDialogTask, setImplementationDialogTask] =
+    useState<TodoTaskView | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [isPending, startTransition] = useTransition();
@@ -518,12 +521,14 @@ export function TodoWorkspace({
     }
   }
 
-  function startTaskImplementation(task: TodoTaskView) {
+  function startTaskImplementation(task: TodoTaskView, instructions?: string) {
+    const cleanedInstructions = instructions?.trim();
     markPending(task.id, true);
     startTransition(async () => {
       const result = await startTodoImplementationAction({
         taskId: task.id,
         preferredCodingTool: "codex",
+        instructions: cleanedInstructions || undefined,
       });
       markPending(task.id, false);
       if ("error" in result && result.error) {
@@ -547,7 +552,7 @@ export function TodoWorkspace({
           ),
         );
       }
-      toast.success("Job Hermes envoyé");
+      toast.success(cleanedInstructions ? "Instructions envoyées à Hermes" : "Job Hermes envoyé");
     });
   }
 
@@ -714,7 +719,10 @@ export function TodoWorkspace({
                 onDelete={setTaskToDelete}
                 onAdvance={advanceTask}
                 onCopyPrompt={copyTaskPrompt}
-                onStartImplementation={startTaskImplementation}
+                onStartImplementation={(task) => {
+                  if (task.implementationJob) setImplementationDialogTask(task);
+                  else startTaskImplementation(task);
+                }}
                 onValidateImplementation={validateTaskImplementation}
               />
             </DndContext>
@@ -759,6 +767,21 @@ export function TodoWorkspace({
         }}
         onSubmit={(input) => {
           if (editingTask) updateTask(editingTask, input);
+        }}
+      />
+      <TodoImplementationInstructionsDialog
+        key={implementationDialogTask?.id ?? "implementation-instructions-closed"}
+        task={implementationDialogTask}
+        pending={Boolean(
+          implementationDialogTask && pendingIds.has(implementationDialogTask.id),
+        )}
+        onOpenChange={(open) => {
+          if (!open) setImplementationDialogTask(null);
+        }}
+        onSubmit={(instructions) => {
+          if (!implementationDialogTask) return;
+          startTaskImplementation(implementationDialogTask, instructions);
+          setImplementationDialogTask(null);
         }}
       />
       <DeleteProjectDialog
@@ -923,6 +946,67 @@ function TaskSummaryDialog({
             {generating ? "Génération..." : "Générer le résumé"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TodoImplementationInstructionsDialog({
+  task,
+  pending,
+  onOpenChange,
+  onSubmit,
+}: {
+  task: TodoTaskView | null;
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (instructions: string) => void;
+}) {
+  const [instructions, setInstructions] = useState("");
+  const canSubmit = instructions.trim().length > 0;
+
+  return (
+    <Dialog open={task !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Ajouter des instructions à Hermes</DialogTitle>
+          <DialogDescription>
+            {task
+              ? `UC-${task.number} — décris les corrections ou modifications à demander à Hermes.`
+              : "Décris les corrections ou modifications à demander à Hermes."}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSubmit) onSubmit(instructions);
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="todo-hermes-extra-instructions">
+              Instructions complémentaires
+            </Label>
+            <Textarea
+              id="todo-hermes-extra-instructions"
+              rows={6}
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="Ex: Corrige le texte du bouton, garde le même style, ajoute un test..."
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">
+              Un nouveau job Hermes sera lancé avec le contexte de la tâche et ces
+              consignes. Utilisable pendant un job en cours ou après une PR de
+              correction.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={pending || !canSubmit}>
+              {pending ? "Envoi..." : "Envoyer à Hermes"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -1273,10 +1357,22 @@ function SortableLinearTaskRow({
           event.stopPropagation();
           onStartImplementation(task);
         }}
-        aria-label="Implémenter avec Hermes"
-        title="Implémenter avec Hermes"
+        aria-label={
+          task.implementationJob
+            ? "Ajouter des instructions pour Hermes"
+            : "Implémenter avec Hermes"
+        }
+        title={
+          task.implementationJob
+            ? "Ajouter des instructions pour corriger/modifier avec Hermes"
+            : "Implémenter avec Hermes"
+        }
       >
-        <Sparkles className="size-3.5 stroke-[1.9]" />
+        {task.implementationJob ? (
+          <MessageSquarePlus className="size-3.5 stroke-[1.9]" />
+        ) : (
+          <Sparkles className="size-3.5 stroke-[1.9]" />
+        )}
       </button>
       <button
         type="button"

@@ -43,6 +43,7 @@ const projectSchema = z.object({
 const startImplementationSchema = z.object({
   taskId: z.string().uuid(),
   preferredCodingTool: z.enum(["codex", "claude", "hermes"]).default("codex"),
+  instructions: z.string().trim().max(4_000, "Instructions trop longues").optional(),
 });
 
 const validateImplementationSchema = z.object({
@@ -506,7 +507,7 @@ export async function startTodoImplementationAction(input: unknown) {
   const task = toTodoTask(taskRow);
   const project = await getProjectForUser(user.id, task.projectId);
   if (!project) return { error: "Projet introuvable" };
-
+  const extraInstructions = parsed.data.instructions?.trim() || null;
 
   const hermes = getHermesWebhookConfig();
   if (!hermes.url || !hermes.secret) {
@@ -521,7 +522,9 @@ export async function startTodoImplementationAction(input: unknown) {
       project_id: project.id,
       status: "QUEUED",
       agent: "hermes",
-      logs: `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
+      logs: extraInstructions
+        ? `Job envoyé à Hermes (${parsed.data.preferredCodingTool}) avec instructions complémentaires.`
+        : `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
     })
     .select("*")
     .single();
@@ -543,6 +546,7 @@ export async function startTodoImplementationAction(input: unknown) {
       title: task.title,
       description: task.description,
       status: task.status,
+      additionalInstructions: extraInstructions,
     },
     project: {
       id: project.id,
@@ -552,8 +556,9 @@ export async function startTodoImplementationAction(input: unknown) {
       mode: "hermes",
       preferredCodingTool: parsed.data.preferredCodingTool,
       repositoryResolution: "vps_hermes",
-      instructions:
-        "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels.",
+      instructions: extraInstructions
+        ? `Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Consignes complémentaires utilisateur à appliquer à cette itération: ${extraInstructions}`
+        : "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels.",
     },
     callback: {
       url: `${appUrl}/api/todo/implementation-jobs/${job.id}/callback`,
