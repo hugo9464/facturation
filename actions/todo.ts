@@ -61,6 +61,21 @@ const createSchema = z.object({
   status: statusSchema.default("TODO"),
 });
 
+const importEmailSchema = z.object({
+  content: z.string().trim().min(20, "Colle le contenu de l’email client"),
+  fallbackProjectId: projectIdSchema.optional(),
+});
+
+const importedEmailTaskSchema = z.object({
+  projectId: z.string().uuid().nullable().optional(),
+  title: z.string().trim().min(1).max(140),
+  description: z.string().trim().optional().default(""),
+  alreadyDone: z.boolean().optional().default(false),
+  reason: z.string().trim().optional().default(""),
+});
+
+type EmailTaskProposal = z.infer<typeof importedEmailTaskSchema>;
+
 const updateSchema = z.object({
   title: z.string().trim().min(1, "Titre requis"),
   description: z.string().trim().optional(),
@@ -149,6 +164,36 @@ function isUniqueViolation(error: unknown) {
     error.code === "23505"
   );
 }
+
+function normalizeTaskFingerprint(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractJsonArray(text: string) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const source = fenced?.[1] ?? text;
+  const start = source.indexOf("[");
+  const end = source.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Réponse IA invalide: liste JSON introuvable");
+  }
+  return source.slice(start, end + 1);
+}
+
+function parseEmailTaskProposals(text: string) {
+  const parsed = JSON.parse(extractJsonArray(text)) as unknown;
+  const result = z.array(importedEmailTaskSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new Error("Réponse IA invalide: tâches non reconnues");
+  }
+  return result.data;
+}
+
 
 async function getProjectForUser(userId: string, projectId: string) {
   const supabase = await getSupabaseDb();
@@ -381,6 +426,178 @@ export async function createTodoTaskAction(input: unknown) {
 
   revalidatePath("/todo");
   return { task: serializeTask(toTodoTask(data)) };
+}
+
+export async function importTodoTasksFromEmailAction(input: unknown) {
+  const user = await requireUser();
+  const parsed = importEmailSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const supabase = await getSupabaseDb();
+  const [projectsResult, tasksResult] = await Promise.all([
+    supabase
+      .from("todo_project")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("order", { ascending: true }),
+    supabase
+      .from("todo_task")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("number", { ascending: true }),
+  ]);
+  if (projectsResult.error) throw projectsResult.error;
+  if (tasksResult.error) throw tasksResult.error;
+
+  const projects = (projectsResult.data ?? []).map(toTodoProject);
+  if (projects.length === 0) {
+    return { error: "Crée au moins un projet avant d’importer un email" };
+  }
+  const fallbackProject = parsed.data.fallbackProjectId
+    ? projects.find((project) => project.id === parsed.data.fallbackProjectId)
+    : projects[0];
+  if (!fallbackProject) return { error: "Projet sélectionné introuvable" };
+
+  const existingTasks = (tasksResult.data ?? []).map(toTodoTask);
+  const projectCatalog = projects
+    .map((project) => `- ${project.id}: ${project.name}`)
+    .join("\n");
+  const existingTaskCatalog = existingTasks.length
+    ? existingTasks
+        .map((task) => {
+          const project = projects.find((item) => item.id === task.projectId);
+          return `- ${project?.name ?? "Projet inconnu"} (${task.projectId}) — UC-${task.number} [${TODO_STATUS_LABELS[task.status]}]: ${task.title}`;
+        })
+        .join("\n")
+    : "Aucune tâche existante.";
+
+  let proposals: EmailTaskProposal[];
+  try {
+    const response = await generateText({
+      model: TASK_SUMMARY_MODEL,
+      system:
+        "Tu es Hermes, assistant de tri de demandes client. Tu transformes un email en tâches actionnables pour un kanban de développement, sans inventer de demande absente.",
+      prompt: `Analyse l’email client ci-dessous. Découpe uniquement les demandes actionnables en petites tâches indépendantes. Associe chaque tâche au projet existant le plus pertinent avec son projectId. Si une demande semble déjà couverte par une tâche existante, marque alreadyDone=true et explique brièvement reason au lieu de la recréer.
+
+Réponds uniquement avec un tableau JSON. Chaque élément doit respecter exactement ce format:
+{"projectId":"uuid-du-projet-ou-null","title":"titre court impératif","description":"contexte utile extrait de l'email","alreadyDone":false,"reason":""}
+
+Projets disponibles:
+${projectCatalog}
+
+Tâches existantes à comparer:
+${existingTaskCatalog}
+
+Projet de repli si le projet est ambigu: ${fallbackProject.id} (${fallbackProject.name})
+
+Email client:
+${parsed.data.content}`,
+      maxTokens: 1800,
+    });
+    proposals = parseEmailTaskProposals(response);
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Hermes n’a pas pu analyser l’email",
+    };
+  }
+
+  const projectsById = new Map(projects.map((project) => [project.id, project]));
+  const knownFingerprints = new Set(
+    existingTasks.map((task) => `${task.projectId}:${normalizeTaskFingerprint(task.title)}`),
+  );
+  const createdFingerprints = new Set<string>();
+  const skipped: { title: string; projectName: string; reason: string }[] = [];
+  const candidates: {
+    projectId: string;
+    title: string;
+    description: string | null;
+    status: "TODO";
+    order: number;
+  }[] = [];
+  const nextOrderByProject = new Map<string, number>();
+  for (const task of existingTasks) {
+    if (task.status !== "TODO") continue;
+    nextOrderByProject.set(
+      task.projectId,
+      Math.max(nextOrderByProject.get(task.projectId) ?? 0, task.order + 1),
+    );
+  }
+
+  for (const proposal of proposals) {
+    const project =
+      (proposal.projectId ? projectsById.get(proposal.projectId) : null) ?? fallbackProject;
+    const title = proposal.title.trim();
+    if (!title) continue;
+    const fingerprint = `${project.id}:${normalizeTaskFingerprint(title)}`;
+    if (proposal.alreadyDone || knownFingerprints.has(fingerprint) || createdFingerprints.has(fingerprint)) {
+      skipped.push({
+        title,
+        projectName: project.name,
+        reason:
+          proposal.reason ||
+          (knownFingerprints.has(fingerprint)
+            ? "Une tâche similaire existe déjà dans ce projet."
+            : "Doublon détecté dans l’import."),
+      });
+      continue;
+    }
+    createdFingerprints.add(fingerprint);
+    const order = nextOrderByProject.get(project.id) ?? 0;
+    nextOrderByProject.set(project.id, order + 1);
+    candidates.push({
+      projectId: project.id,
+      title,
+      description: proposal.description?.trim() || null,
+      status: "TODO",
+      order,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return { imported: [] as TodoTaskView[], skipped };
+  }
+
+  const profile = await getProfile(user.id);
+  if (!profile) throw new Error("Profil introuvable");
+  const rows = candidates.map((candidate, index) => ({
+    user_id: user.id,
+    project_id: candidate.projectId,
+    number: profile.nextTaskNumber + index,
+    title: candidate.title,
+    description: candidate.description,
+    status: candidate.status,
+    order: candidate.order,
+    completed_at: null,
+  }));
+  const { data: insertedRows, error: insertError } = await supabase
+    .from("todo_task")
+    .insert(rows)
+    .select("*");
+  if (insertError) throw insertError;
+
+  const { error: profileError } = await supabase
+    .from("profile")
+    .update({
+      next_task_number: profile.nextTaskNumber + rows.length,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", user.id);
+  if (profileError) throw profileError;
+
+  revalidatePath("/todo");
+  for (const projectId of new Set(candidates.map((candidate) => candidate.projectId))) {
+    revalidatePath(`/projects/${projectId}`);
+  }
+
+  return {
+    imported: (insertedRows ?? []).map((row) => serializeTask(toTodoTask(row))),
+    skipped,
+  };
 }
 
 export async function updateTodoTaskAction(id: string, input: unknown) {
