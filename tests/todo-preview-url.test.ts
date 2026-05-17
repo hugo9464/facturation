@@ -1,5 +1,10 @@
 import * as assert from "node:assert/strict";
-import { getConfiguredAppUrl } from "../lib/todo-preview";
+import {
+  buildPreviewAutoAuthAbsoluteUrl,
+  buildPreviewAutoAuthUrl,
+  getConfiguredAppUrl,
+  sanitizePreviewNextPath,
+} from "../lib/todo-preview";
 
 const originalEnv = {
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
@@ -46,6 +51,20 @@ try {
     getConfiguredAppUrl(),
     null,
     "missing deployment URL should fall back to request headers",
+  );
+
+  assert.equal(sanitizePreviewNextPath("/projects/abc?tab=todo#task-53"), "/projects/abc?tab=todo#task-53");
+  assert.equal(sanitizePreviewNextPath("https://evil.test/projects"), "/");
+  assert.equal(sanitizePreviewNextPath("//evil.test/projects"), "/");
+  assert.equal(
+    buildPreviewAutoAuthUrl("/todo?task=53"),
+    "/auth/preview?next=%2Ftodo%3Ftask%3D53",
+    "auth preview URL should wrap the exact protected app path",
+  );
+  assert.equal(
+    buildPreviewAutoAuthAbsoluteUrl("facturation-git-branch-user.vercel.app/", "/projects/p1"),
+    "https://facturation-git-branch-user.vercel.app/auth/preview?next=%2Fprojects%2Fp1",
+    "absolute preview auth URL should normalize the deployment origin",
   );
 } finally {
   resetEnv();
