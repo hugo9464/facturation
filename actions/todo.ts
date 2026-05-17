@@ -29,6 +29,7 @@ import {
 } from "@/lib/hermes-automation";
 import {
   canRequestHermesMerge,
+  getHermesImplementationTestingContract,
   getTodoStatusAfterHermesStart,
   HERMES_MERGE_AGENT,
 } from "@/lib/todo-implementation-workflow";
@@ -765,6 +766,7 @@ export async function startTodoImplementationAction(input: unknown) {
 
   const job = toTodoImplementationJob(jobRow);
   const appUrl = await getAppUrl();
+  const testingContract = getHermesImplementationTestingContract();
   const callbackSecret = getImplementationCallbackSecret();
   const callbackToken = callbackSecret
     ? implementationCallbackTokenFor(job.id, task.id, callbackSecret)
@@ -789,7 +791,8 @@ export async function startTodoImplementationAction(input: unknown) {
       preferredCodingTool: parsed.data.preferredCodingTool,
       repositoryResolution: "vps_hermes",
       instructions:
-        "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels.",
+        "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider.",
+      testing: testingContract,
     },
     callback: {
       url: `${appUrl}/api/todo/implementation-jobs/${job.id}/callback`,
