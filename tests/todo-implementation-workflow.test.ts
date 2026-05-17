@@ -10,6 +10,7 @@ import {
   getHermesImplementationTestingContract,
   getHermesProgressView,
   isHermesJobActive,
+  getTodoStatusAfterHermesStart,
 } from "../lib/todo-implementation-workflow";
 
 assert.equal(
@@ -61,6 +62,17 @@ assert.equal(isHermesJobActive("QUEUED"), true);
 assert.equal(isHermesJobActive("RUNNING"), true);
 assert.equal(isHermesJobActive("WAITING_PREVIEW"), true);
 assert.equal(isHermesJobActive("SUCCEEDED"), false);
+
+assert.equal(
+  getTodoStatusAfterHermesStart("TODO"),
+  "IN_PROGRESS",
+  "starting Hermes on a todo task must move it to in progress immediately",
+);
+assert.equal(
+  getTodoStatusAfterHermesStart("TO_TEST"),
+  "IN_PROGRESS",
+  "restarting Hermes from validation must show that work is in progress again",
+);
 
 assert.deepEqual(
   getHermesProgressView({
