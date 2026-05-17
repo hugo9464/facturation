@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/actions/auth";
 import { TimeEntryDialog } from "@/components/time-entry-dialog";
 import type { TimeEntryProjectOption } from "@/components/time-entry-dialog";
+import { HermesTerminalDialog } from "@/components/hermes-terminal-dialog";
 
 type SidebarProject = {
   id: string;
@@ -260,13 +261,16 @@ export function AppShell({
         <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur md:px-6">
           <div className="md:hidden text-base font-semibold">Facturation</div>
           <div className="flex-1" />
-          <TimeEntryDialog projects={projects}>
-            <Button size="sm" className="gap-1.5">
-              <Plus className="size-4" />
-              <span className="hidden sm:inline">Logger temps</span>
-              <span className="sm:hidden">Temps</span>
-            </Button>
-          </TimeEntryDialog>
+          <div className="flex items-center gap-2">
+            <HermesTerminalDialog />
+            <TimeEntryDialog projects={projects}>
+              <Button size="sm" className="gap-1.5">
+                <Plus className="size-4" />
+                <span className="hidden sm:inline">Logger temps</span>
+                <span className="sm:hidden">Temps</span>
+              </Button>
+            </TimeEntryDialog>
+          </div>
         </header>
         <main className="flex-1 px-4 py-6 pb-20 md:px-6 md:pb-6">
           {children}
