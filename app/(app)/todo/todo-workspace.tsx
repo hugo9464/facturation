@@ -27,6 +27,7 @@ import {
   ExternalLink,
   GitPullRequest,
   GripVertical,
+  MailPlus,
   Plus,
   RefreshCw,
   Sparkles,
@@ -40,6 +41,7 @@ import {
   createTodoTaskAction,
   deleteTodoProjectAction,
   deleteTodoTaskAction,
+  importTodoTasksFromEmailAction,
   reorderTodoTasksAction,
   refreshTodoImplementationJobsAction,
   startTodoImplementationAction,
@@ -266,6 +268,7 @@ export function TodoWorkspace({
     useState<TodoProjectView | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<TodoTaskView | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [emailImportOpen, setEmailImportOpen] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [isPending, startTransition] = useTransition();
 
@@ -694,6 +697,14 @@ export function TodoWorkspace({
               )}
               <button
                 type="button"
+                onClick={() => setEmailImportOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+              >
+                <MailPlus className="size-4" />
+                Importer un email
+              </button>
+              <button
+                type="button"
                 onClick={() => setSummaryOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#1d1d21] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
               >
@@ -782,6 +793,19 @@ export function TodoWorkspace({
           if (taskToDelete) deleteTask(taskToDelete);
         }}
       />
+      <EmailTaskImportDialog
+        key={emailImportOpen ? "email-import-open" : "email-import-closed"}
+        open={emailImportOpen}
+        projects={projects}
+        selectedProjectId={selectedProjectId}
+        onOpenChange={setEmailImportOpen}
+        onImported={({ imported }) => {
+          if (imported.length > 0) {
+            setTasks((current) => normalizeOrders([...current, ...imported]));
+            setSelectedProjectId(imported[0].projectId);
+          }
+        }}
+      />
       <TaskSummaryDialog
         key={summaryOpen ? "summary-open" : "summary-closed"}
         open={summaryOpen}
@@ -789,6 +813,141 @@ export function TodoWorkspace({
         onOpenChange={setSummaryOpen}
       />
     </div>
+  );
+}
+
+function EmailTaskImportDialog({
+  open,
+  projects,
+  selectedProjectId,
+  onOpenChange,
+  onImported,
+}: {
+  open: boolean;
+  projects: TodoProjectView[];
+  selectedProjectId: string;
+  onOpenChange: (open: boolean) => void;
+  onImported: (result: {
+    imported: TodoTaskView[];
+    skipped: { title: string; projectName: string; reason: string }[];
+  }) => void;
+}) {
+  const [content, setContent] = useState("");
+  const [projectId, setProjectId] = useState(selectedProjectId);
+  const [pending, setPending] = useState(false);
+  const [report, setReport] = useState<{
+    imported: TodoTaskView[];
+    skipped: { title: string; projectName: string; reason: string }[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      setProjectId(selectedProjectId || projects[0]?.id || "");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, projects, selectedProjectId]);
+
+  async function importEmail() {
+    if (content.trim().length < 20) {
+      toast.error("Colle le contenu complet de l’email client");
+      return;
+    }
+    setPending(true);
+    setReport(null);
+    const result = await importTodoTasksFromEmailAction({
+      content,
+      fallbackProjectId: projectId || undefined,
+    });
+    setPending(false);
+    if ("error" in result && result.error) {
+      toast.error(result.error);
+      return;
+    }
+    const imported: TodoTaskView[] =
+      "imported" in result ? (result.imported ?? []) : [];
+    const skipped: { title: string; projectName: string; reason: string }[] =
+      "skipped" in result ? (result.skipped ?? []) : [];
+    setReport({ imported, skipped });
+    onImported({ imported, skipped });
+    if (imported.length > 0) {
+      toast.success(`${imported.length} tâche${imported.length > 1 ? "s" : ""} créée${imported.length > 1 ? "s" : ""}`);
+      setContent("");
+    } else {
+      toast.info("Aucune nouvelle tâche à créer");
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Créer des tâches depuis un email client</DialogTitle>
+          <DialogDescription>
+            Colle l’email reçu: Hermes découpe les demandes, choisit le projet le
+            plus pertinent et ignore les demandes déjà couvertes.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email-import-project">Projet de repli</Label>
+            <Select
+              value={projectId}
+              onValueChange={(value) => setProjectId(value ?? "")}
+            >
+              <SelectTrigger id="email-import-project">
+                <SelectValue placeholder="Choisir un projet" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Utilisé seulement si le projet n’est pas identifiable dans l’email.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="email-import-content">Contenu de l’email</Label>
+            <Textarea
+              id="email-import-content"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              rows={12}
+              placeholder="Bonjour, voici les demandes à traiter..."
+              className="text-sm"
+            />
+          </div>
+          {report && (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <p className="font-medium">
+                {report.imported.length} tâche{report.imported.length > 1 ? "s" : ""} créée{report.imported.length > 1 ? "s" : ""}, {report.skipped.length} ignorée{report.skipped.length > 1 ? "s" : ""}.
+              </p>
+              {report.skipped.length > 0 && (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                  {report.skipped.map((item, index) => (
+                    <li key={`${item.title}-${index}`}>
+                      {item.projectName} — {item.title}: {item.reason}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Fermer
+          </Button>
+          <Button type="button" onClick={importEmail} disabled={pending || !projectId}>
+            {pending ? "Analyse Hermes..." : "Créer les tâches"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
