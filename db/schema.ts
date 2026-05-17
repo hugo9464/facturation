@@ -215,6 +215,7 @@ export type TodoImplementationJob = {
   branchName: string | null;
   prUrl: string | null;
   previewUrl: string | null;
+  instructions: string | null;
   logs: string | null;
   errorMessage: string | null;
   createdAt: Date;

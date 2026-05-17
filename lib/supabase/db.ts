@@ -183,6 +183,7 @@ export function toTodoImplementationJob(row: Raw): TodoImplementationJob {
     branchName: (row.branch_name as string | null) ?? null,
     prUrl: (row.pr_url as string | null) ?? null,
     previewUrl: (row.preview_url as string | null) ?? null,
+    instructions: (row.instructions as string | null) ?? null,
     logs: (row.logs as string | null) ?? null,
     errorMessage: (row.error_message as string | null) ?? null,
     createdAt: requiredDate(row.created_at),

@@ -221,6 +221,21 @@ function appendToStatus(
   ]);
 }
 
+function withImplementationJob(
+  task: TodoTaskView,
+  job: NonNullable<TodoTaskView["implementationJob"]>,
+): TodoTaskView {
+  const history = [
+    job,
+    ...(task.implementationJobs ?? []).filter((item) => item.id !== job.id),
+  ].sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  return { ...task, implementationJob: job, implementationJobs: history };
+}
+
 function buildImplementationPrompt(
   template: string,
   appUrl: string,
@@ -355,7 +370,7 @@ export function TodoWorkspace({
       setTasks((current) =>
         current.map((task) => {
           const job = jobsByTaskId.get(task.id);
-          return job ? { ...task, implementationJob: job } : task;
+          return job ? withImplementationJob(task, job) : task;
         }),
       );
     }
@@ -537,7 +552,9 @@ export function TodoWorkspace({
           setTasks((current) =>
             current.map((item) =>
               item.id === task.id
-                ? { ...item, implementationJob: result.job ?? null }
+                ? result.job
+                  ? withImplementationJob(item, result.job)
+                  : item
                 : item,
             ),
           );
@@ -548,7 +565,7 @@ export function TodoWorkspace({
       if (job) {
         setTasks((current) =>
           current.map((item) =>
-            item.id === task.id ? { ...item, implementationJob: job } : item,
+            item.id === task.id ? withImplementationJob(item, job) : item,
           ),
         );
       }
@@ -567,7 +584,9 @@ export function TodoWorkspace({
           setTasks((current) =>
             current.map((item) =>
               item.id === task.id
-                ? { ...item, implementationJob: result.job ?? null }
+                ? result.job
+                  ? withImplementationJob(item, result.job)
+                  : item
                 : item,
             ),
           );
@@ -578,7 +597,7 @@ export function TodoWorkspace({
       if (job) {
         setTasks((current) =>
           current.map((item) =>
-            item.id === task.id ? { ...item, implementationJob: job } : item,
+            item.id === task.id ? withImplementationJob(item, job) : item,
           ),
         );
       }
@@ -1484,6 +1503,12 @@ function TodoTaskDialog({
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [selectedStatus, setSelectedStatus] = useState<TodoStatus>(status);
+  const instructionHistory = (task?.implementationJobs ?? [])
+    .filter((job) => job.instructions?.trim())
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1568,6 +1593,39 @@ function TodoTaskDialog({
                   <ExternalLink className="size-3.5" />
                   Preview Vercel
                 </a>
+              )}
+            </div>
+          )}
+          {task && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Historique des instructions Hermes
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  {instructionHistory.length}
+                </span>
+              </div>
+              {instructionHistory.length > 0 ? (
+                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                  {instructionHistory.map((job) => (
+                    <div
+                      key={job.id}
+                      className="rounded-md border border-border/60 bg-background/60 p-2"
+                    >
+                      <p className="text-[11px] font-medium text-muted-foreground">
+                        {formatDate(job.createdAt)} · {job.status}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+                        {job.instructions ?? ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Aucune instruction complémentaire envoyée à Hermes pour cette tâche.
+                </p>
               )}
             </div>
           )}

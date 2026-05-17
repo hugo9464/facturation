@@ -84,6 +84,7 @@ export type TodoTaskView = Omit<
   updatedAt: string;
   previewToken: string | null;
   implementationJob: TodoImplementationJobView | null;
+  implementationJobs: TodoImplementationJobView[];
 };
 
 export type TodoImplementationJobView = Omit<
@@ -107,6 +108,7 @@ function serializeTask(task: TodoTask): TodoTaskView {
     updatedAt: task.updatedAt.toISOString(),
     previewToken: previewTokenFor(task.id),
     implementationJob: null,
+    implementationJobs: [],
   };
 }
 
@@ -522,6 +524,7 @@ export async function startTodoImplementationAction(input: unknown) {
       project_id: project.id,
       status: "QUEUED",
       agent: "hermes",
+      instructions: extraInstructions,
       logs: extraInstructions
         ? `Job envoyé à Hermes (${parsed.data.preferredCodingTool}) avec instructions complémentaires.`
         : `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
