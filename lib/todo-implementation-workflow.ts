@@ -48,6 +48,11 @@ export function isHermesJobActive(status: TodoImplementationJobStatus) {
   return status === "QUEUED" || status === "RUNNING" || status === "WAITING_PREVIEW";
 }
 
+export function getTodoStatusAfterHermesStart(status: TodoStatus): TodoStatus {
+  void status;
+  return "IN_PROGRESS";
+}
+
 export function parseHermesProgressSteps(logs: string | null | undefined) {
   if (!logs) return [];
   return logs

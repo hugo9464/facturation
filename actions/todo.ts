@@ -29,6 +29,7 @@ import {
 } from "@/lib/hermes-automation";
 import {
   canRequestHermesMerge,
+  getTodoStatusAfterHermesStart,
   HERMES_MERGE_AGENT,
 } from "@/lib/todo-implementation-workflow";
 
@@ -503,7 +504,25 @@ export async function startTodoImplementationAction(input: unknown) {
   if (taskError) throw taskError;
   if (!taskRow) return { error: "Tâche introuvable" };
 
-  const task = toTodoTask(taskRow);
+  let task = toTodoTask(taskRow);
+  const hermesTaskStatus = getTodoStatusAfterHermesStart(task.status);
+  if (task.status !== hermesTaskStatus) {
+    const order = await nextTaskOrder(user.id, task.projectId, hermesTaskStatus);
+    const { data: updatedTaskRow, error: updateTaskError } = await supabase
+      .from("todo_task")
+      .update({
+        status: hermesTaskStatus,
+        order,
+        completed_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id)
+      .select("*")
+      .single();
+    if (updateTaskError) throw updateTaskError;
+    task = toTodoTask(updatedTaskRow);
+  }
   const project = await getProjectForUser(user.id, task.projectId);
   if (!project) return { error: "Projet introuvable" };
 
@@ -587,6 +606,7 @@ export async function startTodoImplementationAction(input: unknown) {
       .single();
     return {
       error: message,
+      task: serializeTask(task),
       job: failedRow
         ? serializeTodoImplementationJob(toTodoImplementationJob(failedRow))
         : serializeTodoImplementationJob(job),
@@ -595,7 +615,7 @@ export async function startTodoImplementationAction(input: unknown) {
 
   revalidatePath("/todo");
   revalidatePath(`/projects/${project.id}`);
-  return { job: serializeTodoImplementationJob(job) };
+  return { task: serializeTask(task), job: serializeTodoImplementationJob(job) };
 }
 
 export async function refreshTodoImplementationJobsAction(input: unknown) {
@@ -605,9 +625,18 @@ export async function refreshTodoImplementationJobsAction(input: unknown) {
     return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
   }
   const taskIds = Array.from(new Set(parsed.data.taskIds));
-  if (taskIds.length === 0) return { jobs: [] as TodoImplementationJobView[] };
+  if (taskIds.length === 0) {
+    return { jobs: [] as TodoImplementationJobView[], tasks: [] as TodoTaskView[] };
+  }
 
   const supabase = await getSupabaseDb();
+  const { data: taskRows, error: taskError } = await supabase
+    .from("todo_task")
+    .select("*")
+    .eq("user_id", user.id)
+    .in("id", taskIds);
+  if (taskError) throw taskError;
+
   const { data: jobRows, error } = await supabase
     .from("todo_implementation_job")
     .select("*")
@@ -622,6 +651,7 @@ export async function refreshTodoImplementationJobsAction(input: unknown) {
   }
 
   return {
+    tasks: (taskRows ?? []).map((row) => serializeTask(toTodoTask(row))),
     jobs: Array.from(latestJobByTaskId.values()).map(serializeTodoImplementationJob),
   };
 }

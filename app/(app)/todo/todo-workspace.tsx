@@ -349,11 +349,19 @@ export function TodoWorkspace({
       });
       if (cancelled || !("jobs" in result) || !result.jobs) return;
       const jobsByTaskId = new Map(result.jobs.map((job) => [job.taskId, job]));
+      const tasksById = new Map((result.tasks ?? []).map((task) => [task.id, task]));
       setTasks((current) =>
-        current.map((task) => {
-          const job = jobsByTaskId.get(task.id);
-          return job ? { ...task, implementationJob: job } : task;
-        }),
+        normalizeOrders(
+          current.map((task) => {
+            const updatedTask = tasksById.get(task.id);
+            const job = jobsByTaskId.get(task.id);
+            if (!updatedTask && !job) return task;
+            return {
+              ...(updatedTask ?? task),
+              implementationJob: job ?? updatedTask?.implementationJob ?? task.implementationJob,
+            };
+          }),
+        ),
       );
     }
 
@@ -519,7 +527,9 @@ export function TodoWorkspace({
   }
 
   function startTaskImplementation(task: TodoTaskView) {
+    const previous = tasks;
     markPending(task.id, true);
+    setTasks((current) => appendToStatus(current, task, "IN_PROGRESS"));
     startTransition(async () => {
       const result = await startTodoImplementationAction({
         taskId: task.id,
@@ -527,6 +537,7 @@ export function TodoWorkspace({
       });
       markPending(task.id, false);
       if ("error" in result && result.error) {
+        setTasks(previous);
         toast.error(result.error);
         if ("job" in result && result.job) {
           setTasks((current) =>
@@ -540,10 +551,18 @@ export function TodoWorkspace({
         return;
       }
       const job = "job" in result ? result.job : null;
-      if (job) {
+      const updatedTask = "task" in result ? result.task : null;
+      if (job || updatedTask) {
         setTasks((current) =>
-          current.map((item) =>
-            item.id === task.id ? { ...item, implementationJob: job } : item,
+          normalizeOrders(
+            current.map((item) =>
+              item.id === task.id
+                ? {
+                    ...(updatedTask ?? item),
+                    implementationJob: job ?? updatedTask?.implementationJob ?? item.implementationJob,
+                  }
+                : item,
+            ),
           ),
         );
       }
