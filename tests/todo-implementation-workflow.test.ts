@@ -6,6 +6,8 @@ import {
 import {
   shouldMoveTaskToValidationAfterCallback,
   canRequestHermesMerge,
+  getHermesProgressView,
+  isHermesJobActive,
 } from "../lib/todo-implementation-workflow";
 
 assert.equal(
@@ -52,5 +54,38 @@ const mergeHeaders = createHermesWebhookHeaders(
   MERGE_TASK_EVENT,
 );
 assert.equal(mergeHeaders["X-GitHub-Event"], MERGE_TASK_EVENT);
+
+assert.equal(isHermesJobActive("QUEUED"), true);
+assert.equal(isHermesJobActive("RUNNING"), true);
+assert.equal(isHermesJobActive("WAITING_PREVIEW"), true);
+assert.equal(isHermesJobActive("SUCCEEDED"), false);
+
+assert.deepEqual(
+  getHermesProgressView({
+    status: "RUNNING",
+    logs: "Clone du dépôt\nTests en cours\nOuverture de la PR",
+    updatedAt: "2026-05-17T20:00:00.000Z",
+  }),
+  {
+    label: "En cours",
+    tone: "active",
+    detail: "Ouverture de la PR",
+    steps: ["Clone du dépôt", "Tests en cours", "Ouverture de la PR"],
+  },
+);
+
+assert.deepEqual(
+  getHermesProgressView({
+    status: "WAITING_PREVIEW",
+    logs: "PR ouverte",
+    updatedAt: "2026-05-17T20:00:00.000Z",
+  }),
+  {
+    label: "Preview en attente",
+    tone: "waiting",
+    detail: "PR ouverte",
+    steps: ["PR ouverte"],
+  },
+);
 
 console.log("todo implementation workflow tests passed");

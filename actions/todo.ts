@@ -49,6 +49,10 @@ const validateImplementationSchema = z.object({
   taskId: z.string().uuid(),
 });
 
+const implementationJobsRefreshSchema = z.object({
+  taskIds: z.array(z.string().uuid()).max(100),
+});
+
 const createSchema = z.object({
   projectId: projectIdSchema,
   title: z.string().trim().min(1, "Titre requis"),
@@ -592,6 +596,34 @@ export async function startTodoImplementationAction(input: unknown) {
   revalidatePath("/todo");
   revalidatePath(`/projects/${project.id}`);
   return { job: serializeTodoImplementationJob(job) };
+}
+
+export async function refreshTodoImplementationJobsAction(input: unknown) {
+  const user = await requireUser();
+  const parsed = implementationJobsRefreshSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+  const taskIds = Array.from(new Set(parsed.data.taskIds));
+  if (taskIds.length === 0) return { jobs: [] as TodoImplementationJobView[] };
+
+  const supabase = await getSupabaseDb();
+  const { data: jobRows, error } = await supabase
+    .from("todo_implementation_job")
+    .select("*")
+    .eq("user_id", user.id)
+    .in("task_id", taskIds)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  const latestJobByTaskId = new Map<string, TodoImplementationJob>();
+  for (const job of (jobRows ?? []).map(toTodoImplementationJob)) {
+    if (!latestJobByTaskId.has(job.taskId)) latestJobByTaskId.set(job.taskId, job);
+  }
+
+  return {
+    jobs: Array.from(latestJobByTaskId.values()).map(serializeTodoImplementationJob),
+  };
 }
 
 export async function validateTodoImplementationAction(input: unknown) {
