@@ -28,6 +28,7 @@ import {
   GitPullRequest,
   GripVertical,
   MailPlus,
+  MessageSquarePlus,
   Plus,
   RefreshCw,
   Sparkles,
@@ -246,6 +247,21 @@ function appendToStatus(
   ]);
 }
 
+function withImplementationJob(
+  task: TodoTaskView,
+  job: NonNullable<TodoTaskView["implementationJob"]>,
+): TodoTaskView {
+  const history = [
+    job,
+    ...(task.implementationJobs ?? []).filter((item) => item.id !== job.id),
+  ].sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  return { ...task, implementationJob: job, implementationJobs: history };
+}
+
 function buildImplementationPrompt(
   template: string,
   appUrl: string,
@@ -296,6 +312,8 @@ export function TodoWorkspace({
   const [projectToDelete, setProjectToDelete] =
     useState<TodoProjectView | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<TodoTaskView | null>(null);
+  const [implementationDialogTask, setImplementationDialogTask] =
+    useState<TodoTaskView | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [emailImportOpen, setEmailImportOpen] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
@@ -480,10 +498,8 @@ export function TodoWorkspace({
             const updatedTask = tasksById.get(task.id);
             const job = jobsByTaskId.get(task.id);
             if (!updatedTask && !job) return task;
-            return {
-              ...(updatedTask ?? task),
-              implementationJob: job ?? updatedTask?.implementationJob ?? task.implementationJob,
-            };
+            const nextTask = updatedTask ?? task;
+            return job ? withImplementationJob(nextTask, job) : nextTask;
           }),
         ),
       );
@@ -650,7 +666,8 @@ export function TodoWorkspace({
     }
   }
 
-  function startTaskImplementation(task: TodoTaskView) {
+  function startTaskImplementation(task: TodoTaskView, instructions?: string) {
+    const cleanedInstructions = instructions?.trim();
     const previous = tasks;
     markPending(task.id, true);
     setTasks((current) => appendToStatus(current, task, "IN_PROGRESS"));
@@ -658,6 +675,7 @@ export function TodoWorkspace({
       const result = await startTodoImplementationAction({
         taskId: task.id,
         preferredCodingTool: "codex",
+        instructions: cleanedInstructions || undefined,
       });
       markPending(task.id, false);
       if ("error" in result && result.error) {
@@ -667,7 +685,9 @@ export function TodoWorkspace({
           setTasks((current) =>
             current.map((item) =>
               item.id === task.id
-                ? { ...item, implementationJob: result.job ?? null }
+                ? result.job
+                  ? withImplementationJob(item, result.job)
+                  : item
                 : item,
             ),
           );
@@ -679,18 +699,15 @@ export function TodoWorkspace({
       if (job || updatedTask) {
         setTasks((current) =>
           normalizeOrders(
-            current.map((item) =>
-              item.id === task.id
-                ? {
-                    ...(updatedTask ?? item),
-                    implementationJob: job ?? updatedTask?.implementationJob ?? item.implementationJob,
-                  }
-                : item,
-            ),
+            current.map((item) => {
+              if (item.id !== task.id) return item;
+              const nextTask = updatedTask ?? item;
+              return job ? withImplementationJob(nextTask, job) : nextTask;
+            }),
           ),
         );
       }
-      toast.success("Job Hermes envoyé");
+      toast.success(cleanedInstructions ? "Instructions envoyées à Hermes" : "Job Hermes envoyé");
     });
   }
 
@@ -705,7 +722,9 @@ export function TodoWorkspace({
           setTasks((current) =>
             current.map((item) =>
               item.id === task.id
-                ? { ...item, implementationJob: result.job ?? null }
+                ? result.job
+                  ? withImplementationJob(item, result.job)
+                  : item
                 : item,
             ),
           );
@@ -716,7 +735,7 @@ export function TodoWorkspace({
       if (job) {
         setTasks((current) =>
           current.map((item) =>
-            item.id === task.id ? { ...item, implementationJob: job } : item,
+            item.id === task.id ? withImplementationJob(item, job) : item,
           ),
         );
       }
@@ -876,7 +895,10 @@ export function TodoWorkspace({
                 onDelete={setTaskToDelete}
                 onAdvance={advanceTask}
                 onCopyPrompt={copyTaskPrompt}
-                onStartImplementation={startTaskImplementation}
+                onStartImplementation={(task) => {
+                  if (task.implementationJob) setImplementationDialogTask(task);
+                  else startTaskImplementation(task);
+                }}
                 onValidateImplementation={validateTaskImplementation}
               />
             </DndContext>
@@ -922,6 +944,21 @@ export function TodoWorkspace({
         }}
         onSubmit={(input) => {
           if (editingTask) updateTask(editingTask, input);
+        }}
+      />
+      <TodoImplementationInstructionsDialog
+        key={implementationDialogTask?.id ?? "implementation-instructions-closed"}
+        task={implementationDialogTask}
+        pending={Boolean(
+          implementationDialogTask && pendingIds.has(implementationDialogTask.id),
+        )}
+        onOpenChange={(open) => {
+          if (!open) setImplementationDialogTask(null);
+        }}
+        onSubmit={(instructions) => {
+          if (!implementationDialogTask) return;
+          startTaskImplementation(implementationDialogTask, instructions);
+          setImplementationDialogTask(null);
         }}
       />
       <DeleteProjectDialog
@@ -1383,6 +1420,67 @@ function TaskSummaryDialog({
   );
 }
 
+function TodoImplementationInstructionsDialog({
+  task,
+  pending,
+  onOpenChange,
+  onSubmit,
+}: {
+  task: TodoTaskView | null;
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (instructions: string) => void;
+}) {
+  const [instructions, setInstructions] = useState("");
+  const canSubmit = instructions.trim().length > 0;
+
+  return (
+    <Dialog open={task !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Ajouter des instructions à Hermes</DialogTitle>
+          <DialogDescription>
+            {task
+              ? `UC-${task.number} — décris les corrections ou modifications à demander à Hermes.`
+              : "Décris les corrections ou modifications à demander à Hermes."}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSubmit) onSubmit(instructions);
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="todo-hermes-extra-instructions">
+              Instructions complémentaires
+            </Label>
+            <Textarea
+              id="todo-hermes-extra-instructions"
+              rows={6}
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="Ex: Corrige le texte du bouton, garde le même style, ajoute un test..."
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">
+              Un nouveau job Hermes sera lancé avec le contexte de la tâche et ces
+              consignes. Utilisable pendant un job en cours ou après une PR de
+              correction.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={pending || !canSubmit}>
+              {pending ? "Envoi..." : "Envoyer à Hermes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type TodoViewProps = {
   grouped: Record<TodoStatus, TodoTaskView[]>;
   pendingIds: Set<string>;
@@ -1728,10 +1826,22 @@ function SortableLinearTaskRow({
           event.stopPropagation();
           onStartImplementation(task);
         }}
-        aria-label="Implémenter avec Hermes"
-        title="Implémenter avec Hermes"
+        aria-label={
+          task.implementationJob
+            ? "Ajouter des instructions pour Hermes"
+            : "Implémenter avec Hermes"
+        }
+        title={
+          task.implementationJob
+            ? "Ajouter des instructions pour corriger/modifier avec Hermes"
+            : "Implémenter avec Hermes"
+        }
       >
-        <Sparkles className="size-3.5 stroke-[1.9]" />
+        {task.implementationJob ? (
+          <MessageSquarePlus className="size-3.5 stroke-[1.9]" />
+        ) : (
+          <Sparkles className="size-3.5 stroke-[1.9]" />
+        )}
       </button>
       <button
         type="button"
@@ -1843,6 +1953,12 @@ function TodoTaskDialog({
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [selectedStatus, setSelectedStatus] = useState<TodoStatus>(status);
+  const instructionHistory = (task?.implementationJobs ?? [])
+    .filter((job) => job.instructions?.trim())
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   const testInstructions = task?.implementationJob
     ? getHermesProgressView({
         status: task.implementationJob.status,
@@ -1934,6 +2050,39 @@ function TodoTaskDialog({
                   <ExternalLink className="size-3.5" />
                   Preview Vercel
                 </a>
+              )}
+            </div>
+          )}
+          {task && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Historique des instructions Hermes
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  {instructionHistory.length}
+                </span>
+              </div>
+              {instructionHistory.length > 0 ? (
+                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                  {instructionHistory.map((job) => (
+                    <div
+                      key={job.id}
+                      className="rounded-md border border-border/60 bg-background/60 p-2"
+                    >
+                      <p className="text-[11px] font-medium text-muted-foreground">
+                        {formatDate(job.createdAt)} · {job.status}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+                        {job.instructions ?? ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Aucune instruction complémentaire envoyée à Hermes pour cette tâche.
+                </p>
               )}
             </div>
           )}
