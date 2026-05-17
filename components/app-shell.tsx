@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -25,7 +26,32 @@ type SidebarProject = {
   name: string;
   clientName: string | null;
   clientArchived: boolean;
+  latestTaskUpdate: string | null;
 };
+
+const PROJECT_TASK_SEEN_STORAGE_KEY = "facturation.todo.project-task-seen.v1";
+
+function parseSeenProjectTaskUpdates(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (entry): entry is [string, number] =>
+          typeof entry[1] === "number" && Number.isFinite(entry[1]),
+      ),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function timestampValue(value: string | null) {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -54,6 +80,60 @@ export function AppShell({
   sidebarProjects: SidebarProject[];
 }) {
   const pathname = usePathname();
+  const projectTaskUpdateTimes = useMemo(
+    () =>
+      Object.fromEntries(
+        sidebarProjects.map((project) => [
+          project.id,
+          timestampValue(project.latestTaskUpdate),
+        ]),
+      ),
+    [sidebarProjects],
+  );
+  const [seenProjectTaskUpdates, setSeenProjectTaskUpdates] = useState<
+    Record<string, number>
+  >({});
+  const [seenProjectTaskUpdatesLoaded, setSeenProjectTaskUpdatesLoaded] =
+    useState(false);
+  const currentProjectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
+
+  useEffect(() => {
+    if (seenProjectTaskUpdatesLoaded) return;
+    const frame = window.requestAnimationFrame(() => {
+      const stored = parseSeenProjectTaskUpdates(
+        window.localStorage.getItem(PROJECT_TASK_SEEN_STORAGE_KEY),
+      );
+      const initialSeen = stored ?? projectTaskUpdateTimes;
+      setSeenProjectTaskUpdates(initialSeen);
+      setSeenProjectTaskUpdatesLoaded(true);
+      if (!stored) {
+        window.localStorage.setItem(
+          PROJECT_TASK_SEEN_STORAGE_KEY,
+          JSON.stringify(initialSeen),
+        );
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [projectTaskUpdateTimes, seenProjectTaskUpdatesLoaded]);
+
+  useEffect(() => {
+    if (!seenProjectTaskUpdatesLoaded || !currentProjectId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const latest = projectTaskUpdateTimes[currentProjectId] ?? 0;
+      if (!latest) return;
+      setSeenProjectTaskUpdates((current) => {
+        if ((current[currentProjectId] ?? 0) >= latest) return current;
+        const next = { ...current, [currentProjectId]: latest };
+        window.localStorage.setItem(
+          PROJECT_TASK_SEEN_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+        return next;
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [currentProjectId, projectTaskUpdateTimes, seenProjectTaskUpdatesLoaded]);
+
   return (
     <div className="flex min-h-screen w-full bg-background">
       {/* Desktop sidebar */}
@@ -107,6 +187,11 @@ export function AppShell({
                 sidebarProjects.map((project) => {
                   const href = `/projects/${project.id}`;
                   const active = isActive(pathname, href);
+                  const hasUnseenTaskChange =
+                    seenProjectTaskUpdatesLoaded &&
+                    !active &&
+                    (projectTaskUpdateTimes[project.id] ?? 0) >
+                      (seenProjectTaskUpdates[project.id] ?? 0);
                   return (
                     <Link
                       key={project.id}
@@ -118,7 +203,16 @@ export function AppShell({
                           : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
                       )}
                     >
-                      <span className="block truncate">{project.name}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="block min-w-0 flex-1 truncate">{project.name}</span>
+                        {hasUnseenTaskChange ? (
+                          <span
+                            className="size-2 shrink-0 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.85)]"
+                            aria-label="Tâches modifiées"
+                            title="Tâches modifiées"
+                          />
+                        ) : null}
+                      </span>
                       <span className="block truncate text-[11px] font-normal opacity-75">
                         {project.clientName
                           ? project.clientArchived

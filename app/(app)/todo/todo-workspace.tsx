@@ -166,12 +166,6 @@ function normalizeOrders(tasks: TodoTaskView[]) {
   });
 }
 
-function latestTaskUpdateTime(tasks: TodoTaskView[]) {
-  return tasks.reduce((latest, task) => {
-    const updatedAt = new Date(task.updatedAt).getTime();
-    return Number.isFinite(updatedAt) ? Math.max(latest, updatedAt) : latest;
-  }, 0);
-}
 
 function parseSeenProjectTaskUpdates(value: string | null) {
   if (!value) return null;
@@ -298,7 +292,7 @@ export function TodoWorkspace({
   const [selectedProjectId, setSelectedProjectId] = useState(
     initialProjects[0]?.id ?? "",
   );
-  const [seenProjectTaskUpdates, setSeenProjectTaskUpdates] = useState<
+  const [, setSeenProjectTaskUpdates] = useState<
     Record<string, number>
   >({});
   const [seenProjectTaskUpdatesLoaded, setSeenProjectTaskUpdatesLoaded] =
@@ -418,51 +412,6 @@ export function TodoWorkspace({
     }
     return counts;
   }, [tasks]);
-  const projectIndicators = useMemo(() => {
-    const indicators = new Map<
-      string,
-      {
-        activeCount: number;
-        hasUnseenTaskChange: boolean;
-        latestTaskUpdate: string | null;
-        taskCount: number;
-        toValidateCount: number;
-        runningHermesCount: number;
-      }
-    >();
-
-    for (const project of projects) {
-      const projectTasks = tasks.filter((task) => task.projectId === project.id);
-      const latestUpdateTime = projectTaskUpdateTimes.get(project.id) ??
-        latestTaskUpdateTime(projectTasks);
-      indicators.set(project.id, {
-        activeCount: projectTasks.filter((task) => task.status !== "DONE").length,
-        hasUnseenTaskChange:
-          seenProjectTaskUpdatesLoaded &&
-          project.id !== selectedProjectId &&
-          latestUpdateTime > (seenProjectTaskUpdates[project.id] ?? 0),
-        latestTaskUpdate:
-          projectTasks.find((task) =>
-            new Date(task.updatedAt).getTime() === latestUpdateTime,
-          )?.updatedAt ?? null,
-        taskCount: projectTasks.length,
-        toValidateCount: projectTasks.filter((task) => task.status === "TO_TEST").length,
-        runningHermesCount: projectTasks.filter((task) =>
-          task.implementationJob
-            ? isHermesJobActive(task.implementationJob.status)
-            : false,
-        ).length,
-      });
-    }
-    return indicators;
-  }, [
-    projectTaskUpdateTimes,
-    projects,
-    seenProjectTaskUpdates,
-    seenProjectTaskUpdatesLoaded,
-    selectedProjectId,
-    tasks,
-  ]);
   const activeHermesTaskIds = useMemo(
     () =>
       tasks
@@ -847,7 +796,7 @@ export function TodoWorkspace({
           <TodoProjectSidebar
             projects={projects}
             selectedProjectId={selectedProjectId}
-            indicators={projectIndicators}
+            taskCounts={taskCounts}
             pendingIds={pendingIds}
             onSelectProject={setSelectedProjectId}
             onCreateProject={() => setProjectDialog({ mode: "create" })}
@@ -1005,19 +954,11 @@ export function TodoWorkspace({
   );
 }
 
-type ProjectSidebarIndicator = {
-  activeCount: number;
-  hasUnseenTaskChange: boolean;
-  latestTaskUpdate: string | null;
-  taskCount: number;
-  toValidateCount: number;
-  runningHermesCount: number;
-};
 
 function TodoProjectSidebar({
   projects,
   selectedProjectId,
-  indicators,
+  taskCounts,
   pendingIds,
   onSelectProject,
   onCreateProject,
@@ -1026,7 +967,7 @@ function TodoProjectSidebar({
 }: {
   projects: TodoProjectView[];
   selectedProjectId: string;
-  indicators: Map<string, ProjectSidebarIndicator>;
+  taskCounts: Map<string, number>;
   pendingIds: Set<string>;
   onSelectProject: (projectId: string) => void;
   onCreateProject: () => void;
@@ -1040,7 +981,7 @@ function TodoProjectSidebar({
           <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#a5a5af]">
             Projets
           </h2>
-          <p className="text-[11px] text-[#666671]">Indicateur des tâches modifiées</p>
+          <p className="text-[11px] text-[#666671]">Gestion des projets Todo</p>
         </div>
         <button
           type="button"
@@ -1054,21 +995,9 @@ function TodoProjectSidebar({
       </div>
       <div className="space-y-1.5">
         {projects.map((project) => {
-          const indicator = indicators.get(project.id) ?? {
-            activeCount: 0,
-            hasUnseenTaskChange: false,
-            latestTaskUpdate: null,
-            taskCount: 0,
-            toValidateCount: 0,
-            runningHermesCount: 0,
-          };
           const isSelected = project.id === selectedProjectId;
           const isPending = pendingIds.has(project.id);
-          const statusLabel = indicator.hasUnseenTaskChange
-            ? "Changement dans les tâches"
-            : indicator.latestTaskUpdate
-              ? `Dernier changement ${formatDate(indicator.latestTaskUpdate)}`
-              : "Aucune tâche";
+          const taskCount = taskCounts.get(project.id) ?? 0;
 
           return (
             <div key={project.id} className="group/project relative">
@@ -1080,40 +1009,19 @@ function TodoProjectSidebar({
                   isSelected
                     ? "border-[#3b3b44] bg-[#27272d] text-[#f2f2f4]"
                     : "border-transparent text-[#d7d7df] hover:bg-[#24242a]",
-                  indicator.hasUnseenTaskChange &&
-                    !isSelected &&
-                    "border-sky-400/40 bg-sky-400/[0.06]",
                   isPending && "opacity-60",
                 )}
                 aria-current={isSelected ? "page" : undefined}
-                aria-label={`${project.name}. ${statusLabel}`}
-                title={statusLabel}
               >
-                <span className="relative grid size-7 shrink-0 place-items-center rounded-full bg-[#303039] text-[11px] font-semibold uppercase text-[#f2f2f4]">
+                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#303039] text-[11px] font-semibold uppercase text-[#f2f2f4]">
                   {project.name.trim().slice(0, 1) || "P"}
-                  {indicator.hasUnseenTaskChange && !isSelected ? (
-                    <span
-                      className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border border-[#1d1d21] bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.9)]"
-                      aria-hidden="true"
-                    />
-                  ) : null}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-sm font-medium leading-tight">
-                      {project.name}
-                    </span>
-                    {indicator.hasUnseenTaskChange && !isSelected ? (
-                      <span className="shrink-0 rounded-full bg-sky-400/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none text-sky-200">
-                        Nouveau
-                      </span>
-                    ) : null}
+                  <span className="truncate text-sm font-medium leading-tight">
+                    {project.name}
                   </span>
-                  <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] leading-none text-[#777780]">
-                    <span>{indicator.taskCount} tâche{indicator.taskCount > 1 ? "s" : ""}</span>
-                    {indicator.activeCount > 0 ? <span>• {indicator.activeCount} active{indicator.activeCount > 1 ? "s" : ""}</span> : null}
-                    {indicator.toValidateCount > 0 ? <span className="text-amber-300">• {indicator.toValidateCount} à valider</span> : null}
-                    {indicator.runningHermesCount > 0 ? <span className="text-sky-300">• Hermes</span> : null}
+                  <span className="mt-1 block text-[11px] leading-none text-[#777780]">
+                    {taskCount} tâche{taskCount > 1 ? "s" : ""}
                   </span>
                 </span>
               </button>
@@ -1131,12 +1039,12 @@ function TodoProjectSidebar({
                 <button
                   type="button"
                   className="rounded-md bg-[#1d1d21]/90 px-1.5 py-1 text-[10px] font-medium text-red-300 shadow-sm hover:text-red-200 disabled:opacity-40"
-                  disabled={indicator.taskCount > 0 || isPending}
+                  disabled={taskCount > 0 || isPending}
                   onClick={(event) => {
                     event.stopPropagation();
                     onDeleteProject(project);
                   }}
-                  title={indicator.taskCount > 0 ? "Impossible de supprimer un projet avec des tâches" : "Supprimer"}
+                  title={taskCount > 0 ? "Impossible de supprimer un projet avec des tâches" : "Supprimer"}
                 >
                   Suppr.
                 </button>
