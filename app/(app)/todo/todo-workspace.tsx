@@ -1222,7 +1222,8 @@ function TaskSummaryDialog({
           <DialogTitle>Résumé des tâches</DialogTitle>
           <DialogDescription>
             Tâches « À valider » du projet — sélectionne celles à inclure,
-            l&apos;IA rédige le résumé des modifications effectuées.
+            l&apos;IA lit aussi les PR GitHub et logs Hermes disponibles pour
+            comprendre les changements réellement apportés.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">

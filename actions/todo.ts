@@ -50,6 +50,7 @@ import {
   getTodoStatusAfterHermesStart,
   HERMES_MERGE_AGENT,
 } from "@/lib/todo-implementation-workflow";
+import { buildTodoSummaryImplementationContext } from "@/lib/todo-task-summary-context";
 
 const statusSchema = z.enum(todoStatusEnum.enumValues);
 const projectIdSchema = z.string().uuid();
@@ -1169,24 +1170,59 @@ export async function summarizeTodoTasksAction(input: unknown) {
   const tasks = (data ?? []).map(toTodoTask).sort((a, b) => a.number - b.number);
   if (tasks.length === 0) return { error: "Aucune tâche trouvée" };
 
+  const { data: jobRows, error: jobsError } = await supabase
+    .from("todo_implementation_job")
+    .select("*")
+    .eq("user_id", user.id)
+    .in(
+      "task_id",
+      tasks.map((task) => task.id),
+    )
+    .order("created_at", { ascending: false });
+  if (jobsError) throw jobsError;
+
+  const latestJobByTaskId = new Map<string, TodoImplementationJob>();
+  for (const job of (jobRows ?? []).map(toTodoImplementationJob)) {
+    if (!latestJobByTaskId.has(job.taskId)) latestJobByTaskId.set(job.taskId, job);
+  }
+
   const taskList = tasks
     .map((task) => {
       const description = task.description?.trim();
+      const job = latestJobByTaskId.get(task.id);
       return `- UC-${task.number} — ${task.title} [${TODO_STATUS_LABELS[task.status]}]${
-        description ? `\n  ${description}` : ""
-      }`;
+        description ? `\n  Description: ${description}` : ""
+      }${task.prUrl ? `\n  PR tâche: ${task.prUrl}` : ""}${
+        job?.prUrl ? `\n  PR Hermes: ${job.prUrl}` : ""
+      }${task.previewUrl || job?.previewUrl ? `\n  Preview: ${task.previewUrl ?? job?.previewUrl}` : ""}`;
     })
     .join("\n");
+  const repoContext = await buildTodoSummaryImplementationContext(
+    tasks.map((task) => {
+      const job = latestJobByTaskId.get(task.id);
+      return {
+        taskNumber: task.number,
+        taskTitle: task.title,
+        taskDescription: task.description,
+        taskPrUrl: task.prUrl,
+        taskPreviewUrl: task.previewUrl,
+        jobPrUrl: job?.prUrl,
+        jobPreviewUrl: job?.previewUrl,
+        jobBranchName: job?.branchName,
+        jobLogs: job?.logs,
+      };
+    }),
+  );
   const userPrompt = parsed.data.prompt;
 
   try {
     const summary = await generateText({
       model: TASK_SUMMARY_MODEL,
       system:
-        "Tu es un assistant qui rédige des résumés de travail clairs et concis en français pour un développeur freelance.",
+        "Tu es un assistant qui rédige des résumés de travail clairs et concis en français pour un développeur freelance. Tu peux utiliser le contexte GitHub/Hermes fourni pour comprendre les vrais changements de code, sans exposer de détails sensibles.",
       prompt: `Voici une liste de tâches réalisées sur un projet. Rédige un résumé synthétique des modifications effectuées, destiné à être communiqué à un client.
 
-Commence ta réponse exactement par "Voilà le résumé des modifications effectuées :" puis présente les tâches sous forme de liste à puces, reformulées de manière professionnelle et lisible. Pas de jargon technique inutile, pas de numéros "UC-". Reste factuel : ne rajoute rien qui ne soit pas dans la liste.
+Commence ta réponse exactement par "Voilà le résumé des modifications effectuées :" puis présente les tâches sous forme de liste à puces, reformulées de manière professionnelle et lisible. Pas de jargon technique inutile, pas de numéros "UC-". Utilise le contexte repo/PR pour comprendre ce qui a réellement changé, mais ne cite pas les noms de fichiers sauf si c'est nécessaire pour la clarté. Reste factuel : ne rajoute rien qui ne soit pas étayé par les tâches, les PR, les logs ou les diffs fournis.
 
 ${
   userPrompt
@@ -1194,8 +1230,11 @@ ${
     : ""
 }
 Tâches :
-${taskList}`,
-      maxTokens: 1024,
+${taskList}
+
+Contexte repo, PR et logs Hermes à utiliser pour comprendre les changements :
+${repoContext || "Aucun contexte repo disponible pour les tâches sélectionnées."}`,
+      maxTokens: 1400,
     });
     return { summary };
   } catch (err) {
