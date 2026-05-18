@@ -35,6 +35,15 @@ import {
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
 import { createClient as createSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  ensureTodoAttachmentBucketExists,
+  isTodoAttachmentBucketMissing,
+  safeTodoAttachmentName,
+  TODO_ATTACHMENT_BUCKET,
+  TODO_ATTACHMENT_MAX_BYTES,
+  todoAttachmentMarkdown,
+} from "@/lib/todo-attachments";
 import {
   canRequestHermesMerge,
   getHermesImplementationTestingContract,
@@ -82,31 +91,9 @@ const updateSchema = z.object({
   status: statusSchema,
 });
 
-const TODO_ATTACHMENT_BUCKET = "todo-attachments";
-const TODO_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
-const TODO_ATTACHMENT_SAFE_NAME_RE = /[^a-zA-Z0-9._-]+/g;
-
 const todoAttachmentSchema = z.object({
   taskId: z.string().uuid().optional(),
 });
-
-function safeAttachmentName(name: string) {
-  const cleaned = name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(TODO_ATTACHMENT_SAFE_NAME_RE, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 96);
-  return cleaned || "piece-jointe";
-}
-
-function todoAttachmentMarkdown(name: string, url: string, type: string) {
-  const escapedName = name.replace(/[\[\]]/g, "");
-  return type.startsWith("image/")
-    ? `![${escapedName}](${url})`
-    : `[${escapedName}](${url})`;
-}
 
 const reorderSchema = z.array(
   z.object({
@@ -395,26 +382,58 @@ export async function uploadTodoTaskAttachmentAction(formData: FormData) {
     return { error: "Fichier trop lourd (8 Mo maximum)" };
   }
 
-  const safeName = safeAttachmentName(file.name);
+  const safeName = safeTodoAttachmentName(file.name);
   const folder = parsed.data.taskId ?? "draft";
   const path = `${user.id}/${folder}/${crypto.randomUUID()}-${safeName}`;
+  const contentType = file.type || "application/octet-stream";
   const storage = await createSupabase();
-  const { error: uploadError } = await storage.storage
+  let uploadError: { message?: string } | null = null;
+  let uploadedWithAdmin = false;
+
+  const firstUpload = await storage.storage
     .from(TODO_ATTACHMENT_BUCKET)
     .upload(path, file, {
-      contentType: file.type || "application/octet-stream",
+      contentType,
       upsert: false,
     });
+  uploadError = firstUpload.error;
+
+  if (uploadError) {
+    try {
+      const admin = createAdminClient();
+      if (isTodoAttachmentBucketMissing(uploadError)) {
+        const bucket = await ensureTodoAttachmentBucketExists(admin);
+        if (!bucket.ok) return { error: `Upload pièce jointe: ${bucket.error}` };
+      }
+      const retry = await admin.storage.from(TODO_ATTACHMENT_BUCKET).upload(path, file, {
+        contentType,
+        upsert: false,
+      });
+      uploadError = retry.error;
+      uploadedWithAdmin = !retry.error;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        error: isTodoAttachmentBucketMissing(uploadError)
+          ? "Upload pièce jointe: bucket todo-attachments introuvable et création automatique indisponible"
+          : `Upload pièce jointe: ${message}`,
+      };
+    }
+  }
+
   if (uploadError) return { error: `Upload pièce jointe: ${uploadError.message}` };
 
-  const { data } = storage.storage.from(TODO_ATTACHMENT_BUCKET).getPublicUrl(path);
+  const publicUrlClient = uploadedWithAdmin ? createAdminClient() : storage;
+  const { data } = publicUrlClient.storage
+    .from(TODO_ATTACHMENT_BUCKET)
+    .getPublicUrl(path);
   const url = data.publicUrl;
   return {
     attachment: {
       name: file.name,
       url,
-      contentType: file.type || "application/octet-stream",
-      markdown: todoAttachmentMarkdown(file.name, url, file.type || ""),
+      contentType,
+      markdown: todoAttachmentMarkdown(file.name, url, contentType),
     },
   };
 }
