@@ -97,6 +97,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   canRequestHermesMerge,
+  canRetryHermesImplementation,
   getHermesProgressView,
   getHermesStatusTransition,
   getTodoPullRequestState,
@@ -1323,16 +1324,26 @@ function TodoImplementationInstructionsDialog({
   const [instructions, setInstructions] = useState("");
   const [preferredCodingTool, setPreferredCodingTool] =
     useState<PreferredCodingTool>(task ? preferredCodingToolForTask(task) : "codex");
-  const canSubmit = instructions.trim().length > 0;
+  const canRetry = task
+    ? canRetryHermesImplementation({
+        jobStatus: task.implementationJob?.status,
+        jobAgent: task.implementationJob?.agent,
+      })
+    : false;
+  const canSubmit = canRetry || instructions.trim().length > 0;
 
   return (
     <Dialog open={task !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Ajouter des instructions à Hermes</DialogTitle>
+          <DialogTitle>
+            {canRetry ? "Relancer la tâche dans Hermes" : "Ajouter des instructions à Hermes"}
+          </DialogTitle>
           <DialogDescription>
-            {task
-              ? `UC-${task.number} — décris les corrections ou modifications à demander à Hermes.`
+            {task && canRetry
+              ? `UC-${task.number} — le dernier job a échoué. Relance Hermes tel quel ou ajoute une consigne de correction.`
+              : task
+                ? `UC-${task.number} — décris les corrections ou modifications à demander à Hermes.`
               : "Décris les corrections ou modifications à demander à Hermes."}
           </DialogDescription>
         </DialogHeader>
@@ -1379,14 +1390,14 @@ function TodoImplementationInstructionsDialog({
               autoFocus
             />
             <p className="text-xs text-muted-foreground">
-              Un nouveau job Hermes sera lancé avec le contexte de la tâche et ces
-              consignes. Utilisable pendant un job en cours ou après une PR de
-              correction.
+              {canRetry
+                ? "Un nouveau job Hermes sera lancé avec le contexte complet de la tâche et l’historique existant. Les consignes sont optionnelles pour une simple relance."
+                : "Un nouveau job Hermes sera lancé avec le contexte de la tâche et ces consignes. Utilisable pendant un job en cours ou après une PR de correction."}
             </p>
           </div>
           <DialogFooter>
             <Button type="submit" disabled={pending || !canSubmit}>
-              {pending ? "Envoi..." : "Envoyer à Hermes"}
+              {pending ? "Envoi..." : canRetry ? "Relancer Hermes" : "Envoyer à Hermes"}
             </Button>
           </DialogFooter>
         </form>
@@ -1695,6 +1706,10 @@ function SortableLinearTaskRow({
   });
   const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
   const taskPreviewUrl = buildTodoTaskPreviewUrl(task.previewUrl, task.projectId);
+  const canRetryHermes = canRetryHermesImplementation({
+    jobStatus: task.implementationJob?.status,
+    jobAgent: task.implementationJob?.agent,
+  });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1860,17 +1875,23 @@ function SortableLinearTaskRow({
           onStartImplementation(task);
         }}
         aria-label={
-          task.implementationJob
-            ? "Ajouter des instructions pour Hermes"
-            : "Implémenter avec Hermes"
+          canRetryHermes
+            ? "Relancer la tâche dans Hermes"
+            : task.implementationJob
+              ? "Ajouter des instructions pour Hermes"
+              : "Implémenter avec Hermes"
         }
         title={
-          task.implementationJob
-            ? "Ajouter des instructions pour corriger/modifier avec Hermes"
-            : "Implémenter avec Hermes"
+          canRetryHermes
+            ? "Relancer le dernier job Hermes échoué"
+            : task.implementationJob
+              ? "Ajouter des instructions pour corriger/modifier avec Hermes"
+              : "Implémenter avec Hermes"
         }
       >
-        {task.implementationJob ? (
+        {canRetryHermes ? (
+          <RefreshCw className="size-3.5 stroke-[1.9]" />
+        ) : task.implementationJob ? (
           <MessageSquarePlus className="size-3.5 stroke-[1.9]" />
         ) : (
           <Sparkles className="size-3.5 stroke-[1.9]" />

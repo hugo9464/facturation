@@ -74,6 +74,51 @@ const implementationJobsRefreshSchema = z.object({
   taskIds: z.array(z.string().uuid()).max(100),
 });
 
+const HERMES_DISPATCH_ATTEMPTS = 3;
+
+function hermesDispatchFailureMessage(message: string) {
+  return `Hermes indisponible après ${HERMES_DISPATCH_ATTEMPTS} tentatives (${message}). Tu peux relancer la tâche depuis Todo.`;
+}
+
+async function postHermesWebhookWithRetry({
+  url,
+  body,
+  secret,
+  eventType,
+}: {
+  url: string;
+  body: string;
+  secret: string;
+  eventType?: string;
+}) {
+  let lastMessage = "erreur inconnue";
+
+  for (let attempt = 1; attempt <= HERMES_DISPATCH_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: createHermesWebhookHeaders(body, secret, eventType),
+        body,
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (response.ok) return { ok: true as const, attempts: attempt };
+      lastMessage = `HTTP ${response.status}`;
+    } catch (error) {
+      lastMessage = error instanceof Error ? error.message : "échec réseau";
+    }
+
+    if (attempt < HERMES_DISPATCH_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+    }
+  }
+
+  return {
+    ok: false as const,
+    attempts: HERMES_DISPATCH_ATTEMPTS,
+    message: hermesDispatchFailureMessage(lastMessage),
+  };
+}
+
 const createSchema = z.object({
   projectId: projectIdSchema,
   title: z.string().trim().min(1, "Titre requis"),
@@ -867,22 +912,19 @@ export async function startTodoImplementationAction(input: unknown) {
   };
   const body = JSON.stringify(payload);
 
-  try {
-    const response = await fetch(hermes.url, {
-      method: "POST",
-      headers: createHermesWebhookHeaders(body, hermes.secret),
-      body,
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Hermes HTTP ${response.status}: ${text.slice(0, 240)}`);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Échec appel Hermes";
+  const dispatch = await postHermesWebhookWithRetry({
+    url: hermes.url,
+    body,
+    secret: hermes.secret,
+  });
+  if (!dispatch.ok) {
+    const message = dispatch.message;
+    const failedLogs = `${job.logs ?? "Job envoyé à Hermes."}\nÉchec d’envoi à Hermes après ${dispatch.attempts} tentatives. Relance possible depuis Todo.`;
     const { data: failedRow } = await supabase
       .from("todo_implementation_job")
       .update({
         status: "FAILED",
+        logs: failedLogs,
         error_message: message,
         updated_at: new Date().toISOString(),
       })
@@ -1052,22 +1094,20 @@ export async function validateTodoImplementationAction(input: unknown) {
   };
   const body = JSON.stringify(payload);
 
-  try {
-    const response = await fetch(hermes.url, {
-      method: "POST",
-      headers: createHermesWebhookHeaders(body, hermes.secret, MERGE_TASK_EVENT),
-      body,
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Hermes HTTP ${response.status}: ${text.slice(0, 240)}`);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Échec appel Hermes";
+  const dispatch = await postHermesWebhookWithRetry({
+    url: hermes.url,
+    body,
+    secret: hermes.secret,
+    eventType: MERGE_TASK_EVENT,
+  });
+  if (!dispatch.ok) {
+    const message = dispatch.message;
+    const failedLogs = `${job.logs ?? "Validation utilisateur envoyée à Hermes pour merge dans main."}\nÉchec d’envoi à Hermes après ${dispatch.attempts} tentatives. Relance la validation quand le webhook est disponible.`;
     const { data: failedRow } = await supabase
       .from("todo_implementation_job")
       .update({
         status: "FAILED",
+        logs: failedLogs,
         error_message: message,
         updated_at: new Date().toISOString(),
       })
