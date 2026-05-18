@@ -16,6 +16,10 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  parseSeenProjectTaskUpdates,
+  timestampValue,
+} from "@/lib/todo-task-review";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/actions/auth";
 import { TimeEntryDialog } from "@/components/time-entry-dialog";
@@ -31,28 +35,6 @@ type SidebarProject = {
 };
 
 const PROJECT_TASK_SEEN_STORAGE_KEY = "facturation.todo.project-task-seen.v1";
-
-function parseSeenProjectTaskUpdates(value: string | null) {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, number] =>
-          typeof entry[1] === "number" && Number.isFinite(entry[1]),
-      ),
-    );
-  } catch {
-    return null;
-  }
-}
-
-function timestampValue(value: string | null) {
-  if (!value) return 0;
-  const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
