@@ -90,6 +90,10 @@ import {
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
 import { parseTodoDescriptionParts } from "@/lib/todo-description-preview";
+import {
+  hasUnseenTaskChange,
+  parseSeenProjectTaskUpdates,
+} from "@/lib/todo-task-review";
 import { cn } from "@/lib/utils";
 import {
   canRequestHermesMerge,
@@ -246,22 +250,6 @@ function normalizeOrders(tasks: TodoTaskView[]) {
   });
 }
 
-
-function parseSeenProjectTaskUpdates(value: string | null) {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, number] =>
-          typeof entry[1] === "number" && Number.isFinite(entry[1]),
-      ),
-    );
-  } catch {
-    return null;
-  }
-}
 
 function moveTask(
   tasks: TodoTaskView[],
@@ -433,7 +421,10 @@ export function TodoWorkspace({
   const [selectedProjectId, setSelectedProjectId] = useState(
     initialProjects[0]?.id ?? "",
   );
-  const [, setSeenProjectTaskUpdates] = useState<
+  const [seenProjectTaskUpdates, setSeenProjectTaskUpdates] = useState<
+    Record<string, number>
+  >({});
+  const [taskReviewThresholds, setTaskReviewThresholds] = useState<
     Record<string, number>
   >({});
   const [seenProjectTaskUpdatesLoaded, setSeenProjectTaskUpdatesLoaded] =
@@ -493,6 +484,7 @@ export function TodoWorkspace({
       const initialSeen =
         stored ?? Object.fromEntries(Array.from(projectTaskUpdateTimes.entries()));
       setSeenProjectTaskUpdates(initialSeen);
+      setTaskReviewThresholds(initialSeen);
       setSeenProjectTaskUpdatesLoaded(true);
       if (!stored) {
         window.localStorage.setItem(
@@ -544,6 +536,16 @@ export function TodoWorkspace({
     [activeTasks],
   );
   const grouped = useMemo(() => tasksByStatus(visibleActiveTasks), [visibleActiveTasks]);
+  const taskNeedsReview = React.useCallback(
+    (task: TodoTaskView) =>
+      seenProjectTaskUpdatesLoaded &&
+      hasUnseenTaskChange({
+        taskUpdatedAt: task.updatedAt,
+        projectSeenAt:
+          taskReviewThresholds[task.projectId] ?? seenProjectTaskUpdates[task.projectId],
+      }),
+    [seenProjectTaskUpdates, seenProjectTaskUpdatesLoaded, taskReviewThresholds],
+  );
   const hermesTransitions = useMemo(
     () => tasksByHermesTransition(activeTasks),
     [activeTasks],
@@ -898,6 +900,7 @@ export function TodoWorkspace({
               grouped={grouped}
               hermesTransitions={hermesTransitions}
               pendingIds={pendingIds}
+              taskNeedsReview={taskNeedsReview}
               onCreate={setCreateStatus}
               onEdit={setEditingTask}
               onDelete={setTaskToDelete}
@@ -1327,6 +1330,7 @@ type TodoViewProps = {
     { transition: HermesStatusTransition; tasks: TodoTaskView[] }
   >;
   pendingIds: Set<string>;
+  taskNeedsReview: (task: TodoTaskView) => boolean;
   onCreate: (status: TodoStatus) => void;
   onEdit: (task: TodoTaskView) => void;
   onDelete: (task: TodoTaskView) => void;
@@ -1344,6 +1348,7 @@ function TodoLinearListView({
   grouped,
   hermesTransitions,
   pendingIds,
+  taskNeedsReview,
   onCreate,
   onEdit,
   onDelete,
@@ -1377,6 +1382,7 @@ function TodoLinearListView({
               tasks={grouped[status]}
               collapsed={collapsedStatuses.has(status)}
               pendingIds={pendingIds}
+              taskNeedsReview={taskNeedsReview}
               onCreate={onCreate}
               onToggleCollapse={toggleStatus}
               onEdit={onEdit}
@@ -1392,6 +1398,7 @@ function TodoLinearListView({
                 transition={transition.transition}
                 tasks={transition.tasks}
                 pendingIds={pendingIds}
+                taskNeedsReview={taskNeedsReview}
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onAdvance={onAdvance}
@@ -1412,6 +1419,7 @@ function TodoLinearSection({
   tasks,
   collapsed,
   pendingIds,
+  taskNeedsReview,
   onCreate,
   onToggleCollapse,
   onEdit,
@@ -1492,6 +1500,7 @@ function TodoLinearSection({
                   key={task.id}
                   task={task}
                   pending={pendingIds.has(task.id)}
+                  needsReview={taskNeedsReview(task)}
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onAdvance={onAdvance}
@@ -1512,6 +1521,7 @@ function TodoHermesTransitionSection({
   transition,
   tasks,
   pendingIds,
+  taskNeedsReview,
   onEdit,
   onDelete,
   onAdvance,
@@ -1549,6 +1559,7 @@ function TodoHermesTransitionSection({
               key={task.id}
               task={task}
               pending={pendingIds.has(task.id)}
+              needsReview={taskNeedsReview(task)}
               onEdit={onEdit}
               onDelete={onDelete}
               onAdvance={onAdvance}
@@ -1566,6 +1577,7 @@ function TodoHermesTransitionSection({
 function SortableLinearTaskRow({
   task,
   pending,
+  needsReview,
   onEdit,
   onDelete,
   onAdvance,
@@ -1655,6 +1667,13 @@ function SortableLinearTaskRow({
           <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
             {task.title}
           </span>
+          {needsReview ? (
+            <span
+              className="size-2 shrink-0 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.85)]"
+              aria-label="Tâche modifiée à regarder"
+              title="Tâche modifiée à regarder"
+            />
+          ) : null}
           {task.completedAt && (
             <span
               className="shrink-0 font-mono text-[11px] leading-none text-[#777780]"
@@ -1817,6 +1836,7 @@ function SortableLinearTaskRow({
 type SortableTaskProps = {
   task: TodoTaskView;
   pending: boolean;
+  needsReview?: boolean;
   onEdit: (task: TodoTaskView) => void;
   onDelete: (task: TodoTaskView) => void;
   onAdvance: (task: TodoTaskView) => void;
