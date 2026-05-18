@@ -18,6 +18,13 @@ import {
 import { requireUser } from "@/lib/auth";
 import { nextTodoStatus, TODO_STATUS_LABELS } from "@/lib/todo";
 import { generateText, TASK_SUMMARY_MODEL } from "@/lib/anthropic";
+import {
+  buildEmailTaskImportPrompt,
+  extractEmailTaskCandidates,
+  normalizeTaskFingerprint,
+  parseEmailTaskProposals,
+  type EmailTaskProposal,
+} from "@/lib/email-task-import";
 import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
 import {
   createHermesWebhookHeaders,
@@ -67,16 +74,6 @@ const importEmailSchema = z.object({
   content: z.string().trim().min(20, "Colle le contenu de l’email client"),
   fallbackProjectId: projectIdSchema.optional(),
 });
-
-const importedEmailTaskSchema = z.object({
-  projectId: z.string().uuid().nullable().optional(),
-  title: z.string().trim().min(1).max(140),
-  description: z.string().trim().optional().default(""),
-  alreadyDone: z.boolean().optional().default(false),
-  reason: z.string().trim().optional().default(""),
-});
-
-type EmailTaskProposal = z.infer<typeof importedEmailTaskSchema>;
 
 const updateSchema = z.object({
   title: z.string().trim().min(1, "Titre requis"),
@@ -168,36 +165,6 @@ function isUniqueViolation(error: unknown) {
     error.code === "23505"
   );
 }
-
-function normalizeTaskFingerprint(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function extractJsonArray(text: string) {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const source = fenced?.[1] ?? text;
-  const start = source.indexOf("[");
-  const end = source.lastIndexOf("]");
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Réponse IA invalide: liste JSON introuvable");
-  }
-  return source.slice(start, end + 1);
-}
-
-function parseEmailTaskProposals(text: string) {
-  const parsed = JSON.parse(extractJsonArray(text)) as unknown;
-  const result = z.array(importedEmailTaskSchema).safeParse(parsed);
-  if (!result.success) {
-    throw new Error("Réponse IA invalide: tâches non reconnues");
-  }
-  return result.data;
-}
-
 
 async function getProjectForUser(userId: string, projectId: string) {
   const supabase = await getSupabaseDb();
@@ -483,31 +450,26 @@ export async function importTodoTasksFromEmailAction(input: unknown) {
       model: TASK_SUMMARY_MODEL,
       system:
         "Tu es Hermes, assistant de tri de demandes client. Tu transformes un email en tâches actionnables pour un kanban de développement, sans inventer de demande absente.",
-      prompt: `Analyse l’email client ci-dessous. Découpe uniquement les demandes actionnables en petites tâches indépendantes. Associe chaque tâche au projet existant le plus pertinent avec son projectId. Si une demande semble déjà couverte par une tâche existante, marque alreadyDone=true et explique brièvement reason au lieu de la recréer.
-
-Réponds uniquement avec un tableau JSON. Chaque élément doit respecter exactement ce format:
-{"projectId":"uuid-du-projet-ou-null","title":"titre court impératif","description":"contexte utile extrait de l'email","alreadyDone":false,"reason":""}
-
-Projets disponibles:
-${projectCatalog}
-
-Tâches existantes à comparer:
-${existingTaskCatalog}
-
-Projet de repli si le projet est ambigu: ${fallbackProject.id} (${fallbackProject.name})
-
-Email client:
-${parsed.data.content}`,
-      maxTokens: 1800,
+      prompt: buildEmailTaskImportPrompt({
+        projectCatalog,
+        existingTaskCatalog,
+        fallbackProjectId: fallbackProject.id,
+        fallbackProjectName: fallbackProject.name,
+        content: parsed.data.content,
+      }),
+      maxTokens: 4000,
     });
     proposals = parseEmailTaskProposals(response);
   } catch (error) {
-    return {
-      error:
-        error instanceof Error
-          ? error.message
-          : "Hermes n’a pas pu analyser l’email",
-    };
+    proposals = extractEmailTaskCandidates(parsed.data.content, fallbackProject.id);
+    if (proposals.length === 0) {
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Hermes n’a pas pu analyser l’email",
+      };
+    }
   }
 
   const projectsById = new Map(projects.map((project) => [project.id, project]));
