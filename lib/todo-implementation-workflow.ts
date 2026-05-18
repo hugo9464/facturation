@@ -93,6 +93,30 @@ export function isHermesJobActive(status: TodoImplementationJobStatus) {
   return status === "QUEUED" || status === "RUNNING" || status === "WAITING_PREVIEW";
 }
 
+export type HermesStatusTransition = {
+  from: TodoStatus;
+  to: TodoStatus;
+};
+
+export function getHermesStatusTransition({
+  taskStatus,
+  jobStatus,
+  jobAgent,
+}: {
+  taskStatus: TodoStatus;
+  jobStatus: TodoImplementationJobStatus | null | undefined;
+  jobAgent: string | null | undefined;
+}): HermesStatusTransition | null {
+  if (!jobStatus || !isHermesJobActive(jobStatus)) return null;
+  if (jobAgent === HERMES_MERGE_AGENT) return null;
+
+  if (taskStatus === "TODO" || taskStatus === "IN_PROGRESS") {
+    return { from: "TODO", to: "IN_PROGRESS" };
+  }
+
+  return null;
+}
+
 export function getTodoStatusAfterHermesStart(status: TodoStatus): TodoStatus {
   void status;
   return "IN_PROGRESS";
