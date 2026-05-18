@@ -1761,7 +1761,10 @@ function TodoTaskDialog({
     : "default";
   const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
 
-  async function uploadAttachment(file: File | undefined) {
+  async function uploadAttachment(
+    file: File | undefined,
+    selection?: { start: number; end: number },
+  ) {
     if (!file) return;
     setUploadingAttachment(true);
     const formData = new FormData();
@@ -1777,11 +1780,15 @@ function TodoTaskDialog({
       const markdown = attachment?.markdown ?? "";
       if (!markdown) return;
       const textarea = descriptionRef.current;
-      const start = textarea?.selectionStart ?? description.length;
-      const end = textarea?.selectionEnd ?? description.length;
+      const start = selection?.start ?? textarea?.selectionStart ?? description.length;
+      const end = selection?.end ?? textarea?.selectionEnd ?? description.length;
       const nextDescription = insertAtCursor(description, markdown, start, end);
       setDescription(nextDescription);
-      toast.success("Pièce jointe ajoutée à la description");
+      toast.success(
+        file.type.startsWith("image/")
+          ? "Image ajoutée à la description"
+          : "Pièce jointe ajoutée à la description",
+      );
       window.requestAnimationFrame(() => {
         textarea?.focus();
         const position = Math.min(nextDescription.length, start + markdown.length + 1);
@@ -1790,6 +1797,20 @@ function TodoTaskDialog({
     } finally {
       setUploadingAttachment(false);
     }
+  }
+
+  function handleDescriptionPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const image = Array.from(event.clipboardData.items)
+      .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+      ?.getAsFile();
+    if (!image) return;
+
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    void uploadAttachment(image, {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    });
   }
 
   return (
@@ -1841,10 +1862,11 @@ function TodoTaskDialog({
               rows={6}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Écris le contexte. Ajoute une image ou un fichier pour insérer un lien Markdown utilisable dans le prompt Hermes."
+              onPaste={handleDescriptionPaste}
+              placeholder="Écris le contexte. Colle une image au milieu du texte, ou ajoute une image/fichier pour insérer un lien Markdown utilisable dans le prompt Hermes."
             />
             <p className="text-xs text-muted-foreground">
-              Les images sont insérées en Markdown et s&apos;affichent dans l&apos;aperçu. Les fichiers restent des liens dans la description, donc ils sont aussi transmis à Hermes dans le prompt.
+              Colle une image directement dans le texte: elle est uploadée puis insérée à l’emplacement du curseur. Les fichiers restent des liens Markdown transmis à Hermes dans le prompt.
             </p>
             <TodoDescriptionPreview description={description} />
           </div>
