@@ -14,12 +14,23 @@ import {
   Settings,
   LogOut,
   Plus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  GripVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   parseSeenProjectTaskUpdates,
   timestampValue,
 } from "@/lib/todo-task-review";
+import {
+  SIDEBAR_COLLAPSED_WIDTH,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_PREFERENCES_STORAGE_KEY,
+  clampSidebarWidth,
+  parseSidebarPreferences,
+  serializeSidebarPreferences,
+} from "@/lib/sidebar-preferences";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/actions/auth";
 import { TimeEntryDialog } from "@/components/time-entry-dialog";
@@ -79,6 +90,67 @@ export function AppShell({
   const [seenProjectTaskUpdatesLoaded, setSeenProjectTaskUpdatesLoaded] =
     useState(false);
   const currentProjectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarPreferencesLoaded, setSidebarPreferencesLoaded] = useState(false);
+  const sidebarDisplayWidth = sidebarCollapsed
+    ? SIDEBAR_COLLAPSED_WIDTH
+    : sidebarWidth;
+  const toggleSidebarLabel = sidebarCollapsed
+    ? "Déplier la sidebar"
+    : "Replier la sidebar";
+
+  useEffect(() => {
+    if (sidebarPreferencesLoaded) return;
+    const frame = window.requestAnimationFrame(() => {
+      const preferences = parseSidebarPreferences(
+        window.localStorage.getItem(SIDEBAR_PREFERENCES_STORAGE_KEY),
+      );
+      if (preferences) {
+        setSidebarWidth(preferences.width);
+        setSidebarCollapsed(preferences.collapsed);
+      }
+      setSidebarPreferencesLoaded(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sidebarPreferencesLoaded]);
+
+  useEffect(() => {
+    if (!sidebarPreferencesLoaded) return;
+    window.localStorage.setItem(
+      SIDEBAR_PREFERENCES_STORAGE_KEY,
+      serializeSidebarPreferences({
+        width: sidebarWidth,
+        collapsed: sidebarCollapsed,
+      }),
+    );
+  }, [sidebarCollapsed, sidebarPreferencesLoaded, sidebarWidth]);
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((collapsed) => !collapsed);
+  }
+
+  function startSidebarResize(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setSidebarCollapsed(false);
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+    };
+    const stopResize = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  }
 
   useEffect(() => {
     if (seenProjectTaskUpdatesLoaded) return;
@@ -120,122 +192,180 @@ export function AppShell({
   return (
     <div className="flex min-h-screen w-full bg-background">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:w-60 md:flex-col md:border-r md:bg-sidebar md:text-sidebar-foreground">
-        <div className="border-b border-sidebar-border px-5 py-4">
-          <Link href="/" className="text-lg font-semibold tracking-tight">
-            Facturation
-          </Link>
+      <aside
+        className={cn(
+          "relative hidden shrink-0 md:flex md:flex-col md:border-r md:bg-sidebar md:text-sidebar-foreground",
+          sidebarCollapsed ? "items-center" : "",
+        )}
+        style={{ width: sidebarDisplayWidth, flexBasis: sidebarDisplayWidth }}
+      >
+        <div
+          className={cn(
+            "flex w-full items-center border-b border-sidebar-border py-3",
+            sidebarCollapsed ? "justify-center px-2" : "justify-between gap-2 px-4",
+          )}
+        >
+          {!sidebarCollapsed ? (
+            <Link href="/" className="min-w-0 truncate text-lg font-semibold tracking-tight">
+              Facturation
+            </Link>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={toggleSidebarLabel}
+            title={toggleSidebarLabel}
+            aria-pressed={sidebarCollapsed}
+            onClick={toggleSidebarCollapsed}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="size-4" />
+            ) : (
+              <PanelLeftClose className="size-4" />
+            )}
+          </Button>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 py-4">
+        <div className={cn("flex-1 overflow-y-auto py-4", sidebarCollapsed ? "px-2" : "px-3")}>
           <nav className="space-y-1">
-          {NAV.map((item) => {
-            const Icon = item.icon;
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                  active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium ring-1 ring-sidebar-border"
-                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                )}
-              >
-                <Icon className="size-4" />
-                {item.label}
-              </Link>
-            );
-          })}
+            {NAV.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  title={sidebarCollapsed ? item.label : undefined}
+                  aria-label={sidebarCollapsed ? item.label : undefined}
+                  className={cn(
+                    "flex items-center rounded-md text-sm transition-colors",
+                    sidebarCollapsed
+                      ? "justify-center px-2 py-2.5"
+                      : "gap-3 px-3 py-2",
+                    active
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium ring-1 ring-sidebar-border"
+                      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  <Icon className="size-4" />
+                  {!sidebarCollapsed ? item.label : null}
+                </Link>
+              );
+            })}
           </nav>
 
-          <div className="mt-6 border-t border-sidebar-border pt-4">
-            <div className="mb-2 flex items-center justify-between px-3">
-              <p className="text-xs font-medium uppercase text-muted-foreground">
-                Projets
-              </p>
-              <Link
-                href="/projects"
-                className="text-xs text-muted-foreground hover:text-sidebar-accent-foreground"
-              >
-                Tout
-              </Link>
-            </div>
-            <nav className="space-y-1">
-              {sidebarProjects.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground">
-                  Aucun projet
+          {!sidebarCollapsed ? (
+            <div className="mt-6 border-t border-sidebar-border pt-4">
+              <div className="mb-2 flex items-center justify-between px-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Projets
                 </p>
-              ) : (
-                sidebarProjects.map((project) => {
-                  const href = `/projects/${project.id}`;
-                  const active = isActive(pathname, href);
-                  const hasUnseenTaskChange =
-                    seenProjectTaskUpdatesLoaded &&
-                    !active &&
-                    (projectTaskUpdateTimes[project.id] ?? 0) >
-                      (seenProjectTaskUpdates[project.id] ?? 0);
-                  return (
-                    <Link
-                      key={project.id}
-                      href={href}
-                      className={cn(
-                        "block rounded-md px-3 py-2 text-sm transition-colors",
-                        active
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium ring-1 ring-sidebar-border"
-                          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                      )}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="block min-w-0 flex-1 truncate">{project.name}</span>
-                        {hasUnseenTaskChange ? (
-                          <span
-                            className="size-2 shrink-0 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.85)]"
-                            aria-label="Tâches modifiées"
-                            title="Tâches modifiées"
-                          />
-                        ) : null}
-                      </span>
-                      <span className="block truncate text-[11px] font-normal opacity-75">
-                        {project.clientName
-                          ? project.clientArchived
-                            ? `${project.clientName} · archivé`
-                            : project.clientName
-                          : "Client à assigner"}
-                      </span>
-                    </Link>
-                  );
-                })
-              )}
-            </nav>
-          </div>
+                <Link
+                  href="/projects"
+                  className="text-xs text-muted-foreground hover:text-sidebar-accent-foreground"
+                >
+                  Tout
+                </Link>
+              </div>
+              <nav className="space-y-1">
+                {sidebarProjects.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-muted-foreground">
+                    Aucun projet
+                  </p>
+                ) : (
+                  sidebarProjects.map((project) => {
+                    const href = `/projects/${project.id}`;
+                    const active = isActive(pathname, href);
+                    const hasUnseenTaskChange =
+                      seenProjectTaskUpdatesLoaded &&
+                      !active &&
+                      (projectTaskUpdateTimes[project.id] ?? 0) >
+                        (seenProjectTaskUpdates[project.id] ?? 0);
+                    return (
+                      <Link
+                        key={project.id}
+                        href={href}
+                        className={cn(
+                          "block rounded-md px-3 py-2 text-sm transition-colors",
+                          active
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium ring-1 ring-sidebar-border"
+                            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="block min-w-0 flex-1 truncate">{project.name}</span>
+                          {hasUnseenTaskChange ? (
+                            <span
+                              className="size-2 shrink-0 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.85)]"
+                              aria-label="Tâches modifiées"
+                              title="Tâches modifiées"
+                            />
+                          ) : null}
+                        </span>
+                        <span className="block truncate text-[11px] font-normal opacity-75">
+                          {project.clientName
+                            ? project.clientArchived
+                              ? `${project.clientName} · archivé`
+                              : project.clientName
+                            : "Client à assigner"}
+                        </span>
+                      </Link>
+                    );
+                  })
+                )}
+              </nav>
+            </div>
+          ) : null}
         </div>
-        <div className="space-y-1 border-t border-sidebar-border px-3 py-3">
+        <div className={cn("space-y-1 border-t border-sidebar-border py-3", sidebarCollapsed ? "w-full px-2" : "px-3")}>
           <Link
             href="/settings"
+            title={sidebarCollapsed ? "Paramètres" : undefined}
+            aria-label={sidebarCollapsed ? "Paramètres" : undefined}
             className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+              "flex items-center rounded-md text-sm transition-colors",
+              sidebarCollapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
               isActive(pathname, "/settings")
                 ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium ring-1 ring-sidebar-border"
                 : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
             )}
           >
             <Settings className="size-4" />
-            Paramètres
+            {!sidebarCollapsed ? "Paramètres" : null}
           </Link>
           <form action={logoutAction}>
             <button
               type="submit"
-              className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground transition-colors"
+              title={sidebarCollapsed ? "Déconnexion" : undefined}
+              aria-label={sidebarCollapsed ? "Déconnexion" : undefined}
+              className={cn(
+                "w-full flex items-center rounded-md text-sm text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground transition-colors",
+                sidebarCollapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
+              )}
             >
               <LogOut className="size-4" />
-              Déconnexion
+              {!sidebarCollapsed ? "Déconnexion" : null}
             </button>
           </form>
-          <p className="px-3 pt-2 text-[11px] text-muted-foreground/80 truncate">
-            {email}
-          </p>
+          {!sidebarCollapsed ? (
+            <p className="px-3 pt-2 text-[11px] text-muted-foreground/80 truncate">
+              {email}
+            </p>
+          ) : null}
         </div>
+        {!sidebarCollapsed ? (
+          <button
+            type="button"
+            aria-label="Redimensionner la sidebar"
+            title="Redimensionner la sidebar"
+            onPointerDown={startSidebarResize}
+            className="absolute -right-2 top-0 hidden h-full w-4 cursor-col-resize items-center justify-center text-muted-foreground/50 transition-colors hover:text-muted-foreground md:flex"
+          >
+            <span className="flex h-10 w-3 items-center justify-center rounded-full bg-sidebar-accent/70 opacity-0 shadow-sm ring-1 ring-sidebar-border transition-opacity hover:opacity-100">
+              <GripVertical className="size-3" />
+            </span>
+          </button>
+        ) : null}
       </aside>
 
       {/* Main */}
