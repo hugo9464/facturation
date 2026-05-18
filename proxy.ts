@@ -9,9 +9,13 @@ export function isPublicTodoApiPath(path: string) {
   );
 }
 
+export function isPublicPreviewLoginPath(path: string) {
+  return path === "/api/dev/preview-login";
+}
+
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  if (isPublicTodoApiPath(path)) {
+  if (isPublicTodoApiPath(path) || isPublicPreviewLoginPath(path)) {
     return NextResponse.next();
   }
 

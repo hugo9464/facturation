@@ -9,6 +9,7 @@ import {
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
 import { shouldMoveTaskToValidationAfterCallback } from "@/lib/todo-implementation-workflow";
+import { buildPreviewAccessUrlFromEnv } from "@/lib/preview-access";
 
 const callbackSchema = z.object({
   taskId: z.string().uuid(),
@@ -64,11 +65,12 @@ export async function POST(
   if (!jobRow) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const job = toTodoImplementationJob(jobRow);
+  const storedPreviewUrl = buildPreviewAccessUrlFromEnv(parsed.data.previewUrl);
   const update = {
     status: parsed.data.status,
     branch_name: parsed.data.branchName ?? job.branchName,
     pr_url: parsed.data.prUrl ?? job.prUrl,
-    preview_url: parsed.data.previewUrl ?? job.previewUrl,
+    preview_url: storedPreviewUrl ?? job.previewUrl,
     logs: parsed.data.logs ?? job.logs,
     error_message: parsed.data.errorMessage ?? job.errorMessage,
     updated_at: new Date().toISOString(),
@@ -84,7 +86,7 @@ export async function POST(
     updated_at: new Date().toISOString(),
   };
   if (parsed.data.prUrl) taskUpdate.pr_url = parsed.data.prUrl;
-  if (parsed.data.previewUrl) taskUpdate.preview_url = parsed.data.previewUrl;
+  if (storedPreviewUrl) taskUpdate.preview_url = storedPreviewUrl;
   const shouldMoveToValidation = shouldMoveTaskToValidationAfterCallback({
     jobAgent: job.agent,
     callbackStatus: parsed.data.status,

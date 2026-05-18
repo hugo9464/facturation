@@ -29,6 +29,22 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Preview login pour les tâches Todo
+
+Les liens de preview enregistrés par les callbacks Todo peuvent pointer vers une route d'auto-login uniquement active sur les déploiements Vercel Preview :
+
+`/api/dev/preview-login?token=...&next=/page-a-tester`
+
+Variables d'environnement à configurer sur Vercel, scope Preview :
+
+- `PREVIEW_LOGIN_SECRET` : secret long et aléatoire ajouté au lien généré.
+- `PREVIEW_LOGIN_EMAIL` : email du compte Supabase de test.
+- `PREVIEW_LOGIN_PASSWORD` : mot de passe du compte Supabase de test.
+
+Optionnel mais recommandé si les previews Vercel sont protégées : activer Protection Bypass for Automation dans Vercel. Si `VERCEL_AUTOMATION_BYPASS_SECRET` est disponible, les liens générés incluent aussi `x-vercel-protection-bypass` et `x-vercel-set-bypass-cookie=true` pour éviter l'écran de login Vercel.
+
+La route refuse de fonctionner hors `VERCEL_ENV=preview`, même si le secret est connu.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.

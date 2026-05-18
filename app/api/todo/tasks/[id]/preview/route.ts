@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { verifyPreviewToken } from "@/lib/todo-preview";
+import { buildPreviewAccessUrlFromEnv } from "@/lib/preview-access";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -41,11 +42,13 @@ export async function POST(
     );
   }
 
+  const storedPreviewUrl = buildPreviewAccessUrlFromEnv(parsed.data.previewUrl);
+
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("todo_task")
     .update({
-      preview_url: parsed.data.previewUrl,
+      preview_url: storedPreviewUrl,
       pr_url: parsed.data.prUrl ?? null,
       updated_at: new Date().toISOString(),
     })
@@ -69,7 +72,7 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     taskId: id,
-    previewUrl: parsed.data.previewUrl,
+    previewUrl: storedPreviewUrl,
     prUrl: parsed.data.prUrl ?? null,
   });
 }
