@@ -1097,6 +1097,7 @@ function TaskSummaryDialog({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(sortedTasks.map((task) => task.id)),
   );
+  const [prompt, setPrompt] = useState("");
   const [summary, setSummary] = useState("");
   const [generating, setGenerating] = useState(false);
 
@@ -1118,6 +1119,7 @@ function TaskSummaryDialog({
     setSummary("");
     const result = await summarizeTodoTasksAction({
       taskIds: Array.from(selectedIds),
+      prompt,
     });
     setGenerating(false);
     if ("error" in result && result.error) {
@@ -1175,6 +1177,21 @@ function TaskSummaryDialog({
                 </label>
               ))
             )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="task-summary-prompt">Consigne IA optionnelle</Label>
+            <Textarea
+              id="task-summary-prompt"
+              rows={3}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              maxLength={2000}
+              placeholder="Ex. Fais le résumé en 3 parties, classe les tâches par date, insiste sur les corrections visibles par le client..."
+              className="text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Ajoute une instruction pour adapter le format ou l&apos;ordre du résumé généré.
+            </p>
           </div>
           {summary && (
             <div className="space-y-2">

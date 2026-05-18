@@ -1136,6 +1136,11 @@ const summarizeSchema = z.object({
     .array(z.string().uuid())
     .min(1, "Sélectionne au moins une tâche")
     .max(100, "Trop de tâches sélectionnées"),
+  prompt: z
+    .string()
+    .trim()
+    .max(2_000, "Consigne trop longue")
+    .optional(),
 });
 
 export async function summarizeTodoTasksAction(input: unknown) {
@@ -1164,6 +1169,7 @@ export async function summarizeTodoTasksAction(input: unknown) {
       }`;
     })
     .join("\n");
+  const userPrompt = parsed.data.prompt;
 
   try {
     const summary = await generateText({
@@ -1174,6 +1180,11 @@ export async function summarizeTodoTasksAction(input: unknown) {
 
 Commence ta réponse exactement par "Voilà le résumé des modifications effectuées :" puis présente les tâches sous forme de liste à puces, reformulées de manière professionnelle et lisible. Pas de jargon technique inutile, pas de numéros "UC-". Reste factuel : ne rajoute rien qui ne soit pas dans la liste.
 
+${
+  userPrompt
+    ? `Consigne complémentaire de mise en forme ou d'organisation à respecter si elle ne contredit pas les règles précédentes :\n${userPrompt}\n`
+    : ""
+}
 Tâches :
 ${taskList}`,
       maxTokens: 1024,
