@@ -109,6 +109,17 @@ export function isHermesJobActive(status: TodoImplementationJobStatus) {
   return status === "QUEUED" || status === "RUNNING" || status === "WAITING_PREVIEW";
 }
 
+export function canRetryHermesImplementation({
+  jobStatus,
+  jobAgent,
+}: {
+  jobStatus: TodoImplementationJobStatus | null | undefined;
+  jobAgent: string | null | undefined;
+}) {
+  if (jobAgent === HERMES_MERGE_AGENT) return false;
+  return jobStatus === "FAILED" || jobStatus === "CANCELLED";
+}
+
 export type HermesStatusTransition = {
   from: TodoStatus;
   to: TodoStatus;

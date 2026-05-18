@@ -5,6 +5,7 @@ import {
 } from "../lib/hermes-automation";
 import {
   shouldMoveTaskToValidationAfterCallback,
+  canRetryHermesImplementation,
   canRequestHermesMerge,
   extractHermesTestInstructions,
   getHermesImplementationTestingContract,
@@ -98,6 +99,22 @@ assert.equal(isHermesJobActive("QUEUED"), true);
 assert.equal(isHermesJobActive("RUNNING"), true);
 assert.equal(isHermesJobActive("WAITING_PREVIEW"), true);
 assert.equal(isHermesJobActive("SUCCEEDED"), false);
+
+assert.equal(
+  canRetryHermesImplementation({ jobStatus: "FAILED", jobAgent: "hermes" }),
+  true,
+  "a failed Hermes implementation can be relaunched",
+);
+assert.equal(
+  canRetryHermesImplementation({ jobStatus: "FAILED", jobAgent: "hermes-merge" }),
+  false,
+  "a failed merge job must not be relaunched as an implementation retry",
+);
+assert.equal(
+  canRetryHermesImplementation({ jobStatus: "RUNNING", jobAgent: "hermes" }),
+  false,
+  "an active Hermes implementation should not expose a retry action",
+);
 
 assert.deepEqual(
   getHermesStatusTransition({
