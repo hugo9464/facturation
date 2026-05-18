@@ -118,6 +118,22 @@ const TODO_LIST_STATUSES = [
   "DONE",
 ] as const satisfies readonly TodoStatus[];
 
+type PreferredCodingTool = "codex" | "claude" | "hermes";
+
+const CODING_TOOL_LABELS: Record<PreferredCodingTool, string> = {
+  codex: "Codex",
+  claude: "Claude Code",
+  hermes: "Hermes seul",
+};
+
+const UI_DESIGN_TASK_PATTERN =
+  /\b(ui|ux|design|interface|front(?:end)?|style|css|tailwind|responsive|mobile|desktop|composant|component|layout|maquette|visuel|visuelle|bouton|modale|dialog|page|écran|ecran)\b/i;
+
+function preferredCodingToolForTask(task: TodoTaskView): PreferredCodingTool {
+  const haystack = `${task.title}\n${task.description ?? ""}`;
+  return UI_DESIGN_TASK_PATTERN.test(haystack) ? "claude" : "codex";
+}
+
 function compareTasks(a: TodoTaskView, b: TodoTaskView) {
   return (
     a.order - b.order ||
@@ -699,7 +715,11 @@ export function TodoWorkspace({
     }
   }
 
-  function startTaskImplementation(task: TodoTaskView, instructions?: string) {
+  function startTaskImplementation(
+    task: TodoTaskView,
+    instructions?: string,
+    preferredCodingTool: PreferredCodingTool = preferredCodingToolForTask(task),
+  ) {
     const cleanedInstructions = instructions?.trim();
     const previous = tasks;
     markPending(task.id, true);
@@ -707,7 +727,7 @@ export function TodoWorkspace({
     startTransition(async () => {
       const result = await startTodoImplementationAction({
         taskId: task.id,
-        preferredCodingTool: "codex",
+        preferredCodingTool,
         instructions: cleanedInstructions || undefined,
       });
       markPending(task.id, false);
@@ -740,7 +760,12 @@ export function TodoWorkspace({
           ),
         );
       }
-      toast.success(cleanedInstructions ? "Instructions envoyées à Hermes" : "Job Hermes envoyé");
+      const toolLabel = CODING_TOOL_LABELS[preferredCodingTool];
+      toast.success(
+        cleanedInstructions
+          ? `Instructions envoyées à Hermes (${toolLabel})`
+          : `Job Hermes envoyé (${toolLabel})`,
+      );
     });
   }
 
@@ -950,9 +975,13 @@ export function TodoWorkspace({
         onOpenChange={(open) => {
           if (!open) setImplementationDialogTask(null);
         }}
-        onSubmit={(instructions) => {
+        onSubmit={(instructions, preferredCodingTool) => {
           if (!implementationDialogTask) return;
-          startTaskImplementation(implementationDialogTask, instructions);
+          startTaskImplementation(
+            implementationDialogTask,
+            instructions,
+            preferredCodingTool,
+          );
           setImplementationDialogTask(null);
         }}
       />
@@ -1288,9 +1317,11 @@ function TodoImplementationInstructionsDialog({
   task: TodoTaskView | null;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (instructions: string) => void;
+  onSubmit: (instructions: string, preferredCodingTool: PreferredCodingTool) => void;
 }) {
   const [instructions, setInstructions] = useState("");
+  const [preferredCodingTool, setPreferredCodingTool] =
+    useState<PreferredCodingTool>(task ? preferredCodingToolForTask(task) : "codex");
   const canSubmit = instructions.trim().length > 0;
 
   return (
@@ -1308,9 +1339,32 @@ function TodoImplementationInstructionsDialog({
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            if (canSubmit) onSubmit(instructions);
+            if (canSubmit) onSubmit(instructions, preferredCodingTool);
           }}
         >
+          <div className="space-y-2">
+            <Label htmlFor="todo-hermes-coding-tool">Agent de code</Label>
+            <Select
+              value={preferredCodingTool}
+              onValueChange={(value) =>
+                setPreferredCodingTool(value as PreferredCodingTool)
+              }
+            >
+              <SelectTrigger id="todo-hermes-coding-tool">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="codex">Codex — par défaut</SelectItem>
+                <SelectItem value="claude">Claude Code — UI/design</SelectItem>
+                <SelectItem value="hermes">Hermes seul</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Les nouveaux jobs choisissent automatiquement Claude Code pour les
+              tâches UI/design, sinon Codex. Tu peux forcer l’agent ici pour une
+              relance avec instructions.
+            </p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="todo-hermes-extra-instructions">
               Instructions complémentaires

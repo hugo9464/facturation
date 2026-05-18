@@ -801,6 +801,7 @@ export async function startTodoImplementationAction(input: unknown) {
   if (!hermes.url || !hermes.secret) {
     return { error: "Variables HERMES_WEBHOOK_URL/HERMES_WEBHOOK_SECRET manquantes" };
   }
+  const preferredCodingTool = parsed.data.preferredCodingTool;
 
   const { data: jobRow, error: jobError } = await supabase
     .from("todo_implementation_job")
@@ -812,8 +813,8 @@ export async function startTodoImplementationAction(input: unknown) {
       agent: "hermes",
       instructions: extraInstructions,
       logs: extraInstructions
-        ? `Job envoyé à Hermes (${parsed.data.preferredCodingTool}) avec instructions complémentaires.`
-        : `Job envoyé à Hermes (${parsed.data.preferredCodingTool}).`,
+        ? `Job envoyé à Hermes (${preferredCodingTool}) avec instructions complémentaires.`
+        : `Job envoyé à Hermes (${preferredCodingTool}).`,
     })
     .select("*")
     .single();
@@ -826,6 +827,13 @@ export async function startTodoImplementationAction(input: unknown) {
   const callbackToken = callbackSecret
     ? implementationCallbackTokenFor(job.id, task.id, callbackSecret)
     : "";
+
+  const preferredCodingToolInstruction =
+    preferredCodingTool === "claude"
+      ? "Utilise Claude Code comme agent de code principal pour cette implémentation (particulièrement adapté UI/design). Hermes reste orchestrateur: il doit vérifier le résultat, lancer les checks, committer, pousser et ouvrir la PR."
+      : preferredCodingTool === "codex"
+        ? "Utilise Codex comme agent de code principal pour cette implémentation. N’utilise Claude Code que si la tâche nécessite une itération UI/design difficile. Hermes reste orchestrateur: il doit vérifier le résultat, lancer les checks, committer, pousser et ouvrir la PR."
+        : "Implémente directement avec Hermes sans déléguer par défaut à Codex ou Claude Code, sauf si nécessaire. Hermes reste responsable des checks, du commit, du push et de la PR.";
 
   const payload = {
     event_type: IMPLEMENT_TASK_EVENT,
@@ -844,11 +852,11 @@ export async function startTodoImplementationAction(input: unknown) {
     },
     automation: {
       mode: "hermes",
-      preferredCodingTool: parsed.data.preferredCodingTool,
+      preferredCodingTool,
       repositoryResolution: "vps_hermes",
       instructions: extraInstructions
-        ? `Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider. Consignes complémentaires utilisateur à appliquer à cette itération: ${extraInstructions}`
-        : "Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider.",
+        ? `${preferredCodingToolInstruction} Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider. Consignes complémentaires utilisateur à appliquer à cette itération: ${extraInstructions}`
+        : `${preferredCodingToolInstruction} Résous le dépôt/projet côté VPS à partir du nom du projet et du contexte de la tâche; les champs repo* sont seulement des indices optionnels. Applique aussi le contrat testing ci-dessous: prépare le jeu de données nécessaire, documente les données de test et fournis une URL directe de preview vers la page à valider.`,
       testing: testingContract,
     },
     callback: {
