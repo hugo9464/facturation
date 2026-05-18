@@ -123,9 +123,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
   html {
     @apply font-sans;
     color-scheme: dark;
+    overflow-x: hidden;
   }
 }

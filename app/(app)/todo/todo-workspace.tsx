@@ -438,6 +438,7 @@ export function TodoWorkspace({
   const [selectedProjectId, setSelectedProjectId] = useState(
     initialProjects[0]?.id ?? "",
   );
+  const [mobileProjectListOpen, setMobileProjectListOpen] = useState(true);
   const [seenProjectTaskUpdates, setSeenProjectTaskUpdates] = useState<
     Record<string, number>
   >({});
@@ -544,6 +545,14 @@ export function TodoWorkspace({
   }, [projects, selectedProjectId]);
 
   const activeProject = projects.find((project) => project.id === selectedProjectId);
+  const projectTaskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const project of projects) counts.set(project.id, 0);
+    for (const task of tasks) {
+      counts.set(task.projectId, (counts.get(task.projectId) ?? 0) + 1);
+    }
+    return counts;
+  }, [projects, tasks]);
   const activeTasks = useMemo(
     () => tasks.filter((task) => task.projectId === selectedProjectId),
     [tasks, selectedProjectId],
@@ -887,9 +896,9 @@ export function TodoWorkspace({
   }
 
   return (
-    <div className="-mx-4 -my-6 min-h-[calc(100vh-3.5rem)] bg-[#17171a] px-4 py-5 text-[#f2f2f4] md:-mx-6 md:px-10">
+    <div className="-mx-3 -my-5 min-h-[calc(100dvh-3.5rem)] overflow-x-hidden bg-[#17171a] px-3 py-4 text-[#f2f2f4] sm:-mx-4 sm:px-4 md:-mx-6 md:-my-6 md:px-10 md:py-5">
       {projects.length === 0 ? (
-        <div className="rounded-[24px] border border-[#2b2b30] bg-[#1d1d21] p-12 text-center">
+        <div className="rounded-[24px] border border-[#2b2b30] bg-[#1d1d21] p-6 text-center sm:p-12">
           <p className="text-sm text-[#777780]">
             Aucun projet Todo disponible. Crée ou sélectionne un projet depuis la
             navigation Projets pour afficher ses tâches ici.
@@ -906,40 +915,104 @@ export function TodoWorkspace({
                 {activeProject?.name ?? "Projet"}
               </h1>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setMobileProjectListOpen(true)}
+                className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a] sm:w-auto md:hidden"
+              >
+                Changer de projet
+              </button>
               <button
                 type="button"
                 onClick={() => setEmailImportOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
+                className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a] sm:w-auto"
               >
                 <MailPlus className="size-4" />
                 Importer un email
               </button>
             </div>
           </div>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragEnd={onDragEnd}
-          >
-            <TodoLinearListView
-              grouped={grouped}
-              hermesTransitions={hermesTransitions}
-              pendingIds={pendingIds}
-              taskNeedsReview={taskNeedsReview}
-              onCreate={setCreateStatus}
-              onEdit={setEditingTask}
-              onDelete={setTaskToDelete}
-              onAdvance={advanceTask}
-              onCopyPrompt={copyTaskPrompt}
-              onStartImplementation={(task) => {
-                if (task.implementationJob) setImplementationDialogTask(task);
-                else startTaskImplementation(task);
-              }}
-              onValidateImplementation={validateTaskImplementation}
-              onOpenSummary={() => setSummaryOpen(true)}
-            />
-          </DndContext>
+          <div className={cn("md:hidden", mobileProjectListOpen ? "block" : "hidden")}>
+            <div className="mb-4 rounded-[20px] border border-[#2b2b30] bg-[#1d1d21] p-3">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#777780]">
+                    Projets
+                  </p>
+                  <h2 className="text-base font-semibold text-[#f2f2f4]">
+                    Choisir une todo list
+                  </h2>
+                </div>
+                {activeProject ? (
+                  <button
+                    type="button"
+                    onClick={() => setMobileProjectListOpen(false)}
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-[#9d9da8] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
+                  >
+                    Fermer
+                  </button>
+                ) : null}
+              </div>
+              <div className="grid gap-2">
+                {projects.map((project) => {
+                  const selected = project.id === selectedProjectId;
+                  const taskCount = projectTaskCounts.get(project.id) ?? 0;
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProjectId(project.id);
+                        setMobileProjectListOpen(false);
+                      }}
+                      className={cn(
+                        "flex min-h-14 items-center justify-between gap-3 rounded-2xl border px-3 py-2 text-left transition-colors",
+                        selected
+                          ? "border-sky-400/40 bg-sky-400/10 text-[#f2f2f4]"
+                          : "border-[#2d2d32] bg-[#17171a] text-[#f2f2f4] hover:bg-[#24242a]",
+                      )}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold">
+                          {project.name}
+                        </span>
+                        <span className="block text-xs text-[#8d8d99]">
+                          {taskCount} tâche{taskCount > 1 ? "s" : ""}
+                        </span>
+                      </span>
+                      <ChevronRight className="size-4 shrink-0 text-[#777780]" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div className={cn(mobileProjectListOpen ? "hidden md:block" : "block")}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragEnd={onDragEnd}
+            >
+              <TodoLinearListView
+                grouped={grouped}
+                hermesTransitions={hermesTransitions}
+                pendingIds={pendingIds}
+                taskNeedsReview={taskNeedsReview}
+                onCreate={setCreateStatus}
+                onEdit={setEditingTask}
+                onDelete={setTaskToDelete}
+                onAdvance={advanceTask}
+                onCopyPrompt={copyTaskPrompt}
+                onStartImplementation={(task) => {
+                  if (task.implementationJob) setImplementationDialogTask(task);
+                  else startTaskImplementation(task);
+                }}
+                onValidateImplementation={validateTaskImplementation}
+                onOpenSummary={() => setSummaryOpen(true)}
+              />
+            </DndContext>
+          </div>
           <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
         </div>
       )}
@@ -1455,7 +1528,7 @@ function TodoLinearListView({
   }
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-5 sm:space-y-7">
       {statuses.map((status) => {
         const transition = hermesTransitions[`${status}->${TODO_STATUSES[TODO_STATUSES.indexOf(status) + 1] ?? ""}`];
         return (
@@ -1525,7 +1598,7 @@ function TodoLinearSection({
 
   return (
     <section ref={setNodeRef} className={cn(isOver && "rounded-xl bg-white/[0.03]")}>
-      <div className="mb-3 flex items-center justify-between px-2 sm:px-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 sm:px-3">
         <button
           type="button"
           className="flex min-w-0 items-center gap-2.5 rounded-md text-left"
@@ -1617,16 +1690,16 @@ function TodoHermesTransitionSection({
 }) {
   return (
     <section className="px-2 sm:px-3" aria-label={statusTransitionLabel(transition)}>
-      <div className="mb-3 flex items-center gap-2.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-sky-300/90">
+      <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-sky-300/90 sm:gap-2.5 sm:text-[12px] sm:tracking-[0.12em]">
         <span
           className={cn("size-3 shrink-0 rounded-full border", statusDotClass(transition.from))}
           aria-hidden="true"
         />
-        <span className="h-px min-w-5 flex-1 bg-sky-400/30" aria-hidden="true" />
+        <span className="h-px min-w-3 flex-1 bg-sky-400/30 sm:min-w-5" aria-hidden="true" />
         <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2 py-1 leading-none">
-          Hermes en transition · {statusTransitionLabel(transition)}
+          <span className="hidden sm:inline">Hermes en transition · </span>{statusTransitionLabel(transition)}
         </span>
-        <span className="h-px min-w-5 flex-1 bg-sky-400/30" aria-hidden="true" />
+        <span className="h-px min-w-3 flex-1 bg-sky-400/30 sm:min-w-5" aria-hidden="true" />
         <span
           className={cn("size-3 shrink-0 rounded-full border", statusDotClass(transition.to))}
           aria-hidden="true"
@@ -1730,7 +1803,7 @@ function SortableLinearTaskRow({
       }}
       className={cn(
         "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
-        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_58px_minmax(0,1fr)_30px_30px_30px_30px_30px] max-sm:px-2",
+        "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_minmax(0,1fr)] max-sm:gap-x-2 max-sm:gap-y-2 max-sm:px-3 max-sm:py-3",
         isDragging && "relative z-10 shadow-2xl shadow-black/40",
         pending && "opacity-60",
       )}
@@ -1746,12 +1819,12 @@ function SortableLinearTaskRow({
       >
         <GripVertical className="size-4 stroke-[1.9]" aria-hidden="true" />
       </button>
-      <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89]">
+      <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89] max-sm:order-3 max-sm:col-start-2 max-sm:px-0 max-sm:text-[11px]">
         UC-{task.number}
       </span>
-      <div className="min-w-0 px-1.5 py-1">
+      <div className="min-w-0 px-1.5 py-1 max-sm:col-start-2 max-sm:row-span-2 max-sm:px-0 max-sm:py-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4]">
+          <span className="min-w-0 truncate text-left text-sm font-medium leading-none tracking-normal text-[#f2f2f4] max-sm:leading-snug">
             {task.title}
           </span>
           {needsReview ? (
@@ -1763,7 +1836,7 @@ function SortableLinearTaskRow({
           ) : null}
           {task.completedAt && (
             <span
-              className="shrink-0 font-mono text-[11px] leading-none text-[#777780]"
+              className="shrink-0 font-mono text-[11px] leading-none text-[#777780] max-sm:hidden"
               title="Date de fin"
             >
               {formatDate(task.completedAt)}
@@ -1830,15 +1903,15 @@ function SortableLinearTaskRow({
             {isHermesJobActive(task.implementationJob.status) ? (
               <RefreshCw className="size-3 shrink-0 animate-spin" aria-hidden="true" />
             ) : null}
-            <span className="shrink-0 font-medium">Avancement Hermes</span>
+            <span className="shrink-0 font-medium max-sm:hidden">Avancement Hermes</span>
             <span className="min-w-0 truncate text-[#b7b7c2]">{hermesProgress.detail}</span>
-            <span className="shrink-0 text-[#777780]">{formatDate(task.implementationJob.updatedAt)}</span>
+            <span className="shrink-0 text-[#777780] max-sm:hidden">{formatDate(task.implementationJob.updatedAt)}</span>
           </div>
         ) : null}
       </div>
       <button
         type="button"
-        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40 max-sm:col-start-1 max-sm:row-start-3"
         disabled={!nextStatus || pending}
         onClick={(event) => {
           event.stopPropagation();
@@ -1851,7 +1924,7 @@ function SortableLinearTaskRow({
       </button>
       <button
         type="button"
-        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-40"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-40 max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-auto max-sm:mr-[9rem]"
         disabled={!canValidate || pending}
         onClick={(event) => {
           event.stopPropagation();
@@ -1868,7 +1941,7 @@ function SortableLinearTaskRow({
       </button>
       <button
         type="button"
-        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40 max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-auto max-sm:mr-[6rem]"
         disabled={pending}
         onClick={(event) => {
           event.stopPropagation();
@@ -1899,7 +1972,7 @@ function SortableLinearTaskRow({
       </button>
       <button
         type="button"
-        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40 max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-auto max-sm:mr-[3rem]"
         disabled={pending}
         onClick={(event) => {
           event.stopPropagation();
@@ -1912,7 +1985,7 @@ function SortableLinearTaskRow({
       </button>
       <button
         type="button"
-        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40 max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-auto"
         disabled={pending}
         onClick={(event) => {
           event.stopPropagation();
