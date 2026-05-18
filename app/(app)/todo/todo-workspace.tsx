@@ -437,6 +437,7 @@ export function TodoWorkspace({
   const [selectedProjectId, setSelectedProjectId] = useState(
     initialProjects[0]?.id ?? "",
   );
+  const [mobileProjectListOpen, setMobileProjectListOpen] = useState(true);
   const [seenProjectTaskUpdates, setSeenProjectTaskUpdates] = useState<
     Record<string, number>
   >({});
@@ -543,6 +544,14 @@ export function TodoWorkspace({
   }, [projects, selectedProjectId]);
 
   const activeProject = projects.find((project) => project.id === selectedProjectId);
+  const projectTaskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const project of projects) counts.set(project.id, 0);
+    for (const task of tasks) {
+      counts.set(task.projectId, (counts.get(task.projectId) ?? 0) + 1);
+    }
+    return counts;
+  }, [projects, tasks]);
   const activeTasks = useMemo(
     () => tasks.filter((task) => task.projectId === selectedProjectId),
     [tasks, selectedProjectId],
@@ -908,6 +917,13 @@ export function TodoWorkspace({
             <div className="flex flex-wrap gap-2 sm:justify-end">
               <button
                 type="button"
+                onClick={() => setMobileProjectListOpen(true)}
+                className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a] sm:w-auto md:hidden"
+              >
+                Changer de projet
+              </button>
+              <button
+                type="button"
                 onClick={() => setEmailImportOpen(true)}
                 className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a] sm:w-auto"
               >
@@ -916,29 +932,86 @@ export function TodoWorkspace({
               </button>
             </div>
           </div>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragEnd={onDragEnd}
-          >
-            <TodoLinearListView
-              grouped={grouped}
-              hermesTransitions={hermesTransitions}
-              pendingIds={pendingIds}
-              taskNeedsReview={taskNeedsReview}
-              onCreate={setCreateStatus}
-              onEdit={setEditingTask}
-              onDelete={setTaskToDelete}
-              onAdvance={advanceTask}
-              onCopyPrompt={copyTaskPrompt}
-              onStartImplementation={(task) => {
-                if (task.implementationJob) setImplementationDialogTask(task);
-                else startTaskImplementation(task);
-              }}
-              onValidateImplementation={validateTaskImplementation}
-              onOpenSummary={() => setSummaryOpen(true)}
-            />
-          </DndContext>
+          <div className={cn("md:hidden", mobileProjectListOpen ? "block" : "hidden")}>
+            <div className="mb-4 rounded-[20px] border border-[#2b2b30] bg-[#1d1d21] p-3">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#777780]">
+                    Projets
+                  </p>
+                  <h2 className="text-base font-semibold text-[#f2f2f4]">
+                    Choisir une todo list
+                  </h2>
+                </div>
+                {activeProject ? (
+                  <button
+                    type="button"
+                    onClick={() => setMobileProjectListOpen(false)}
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-[#9d9da8] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4]"
+                  >
+                    Fermer
+                  </button>
+                ) : null}
+              </div>
+              <div className="grid gap-2">
+                {projects.map((project) => {
+                  const selected = project.id === selectedProjectId;
+                  const taskCount = projectTaskCounts.get(project.id) ?? 0;
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProjectId(project.id);
+                        setMobileProjectListOpen(false);
+                      }}
+                      className={cn(
+                        "flex min-h-14 items-center justify-between gap-3 rounded-2xl border px-3 py-2 text-left transition-colors",
+                        selected
+                          ? "border-sky-400/40 bg-sky-400/10 text-[#f2f2f4]"
+                          : "border-[#2d2d32] bg-[#17171a] text-[#f2f2f4] hover:bg-[#24242a]",
+                      )}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold">
+                          {project.name}
+                        </span>
+                        <span className="block text-xs text-[#8d8d99]">
+                          {taskCount} tâche{taskCount > 1 ? "s" : ""}
+                        </span>
+                      </span>
+                      <ChevronRight className="size-4 shrink-0 text-[#777780]" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div className={cn(mobileProjectListOpen ? "hidden md:block" : "block")}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragEnd={onDragEnd}
+            >
+              <TodoLinearListView
+                grouped={grouped}
+                hermesTransitions={hermesTransitions}
+                pendingIds={pendingIds}
+                taskNeedsReview={taskNeedsReview}
+                onCreate={setCreateStatus}
+                onEdit={setEditingTask}
+                onDelete={setTaskToDelete}
+                onAdvance={advanceTask}
+                onCopyPrompt={copyTaskPrompt}
+                onStartImplementation={(task) => {
+                  if (task.implementationJob) setImplementationDialogTask(task);
+                  else startTaskImplementation(task);
+                }}
+                onValidateImplementation={validateTaskImplementation}
+                onOpenSummary={() => setSummaryOpen(true)}
+              />
+            </DndContext>
+          </div>
           <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
         </div>
       )}
