@@ -38,16 +38,13 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   advanceTodoTaskAction,
-  createTodoProjectAction,
   createTodoTaskAction,
-  deleteTodoProjectAction,
   deleteTodoTaskAction,
   importTodoTasksFromEmailAction,
   reorderTodoTasksAction,
   refreshTodoImplementationJobsAction,
   startTodoImplementationAction,
   summarizeTodoTasksAction,
-  updateTodoProjectAction,
   updateTodoTaskAction,
   validateTodoImplementationAction,
   type TodoProjectView,
@@ -104,9 +101,6 @@ const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
 const PROJECT_STORAGE_KEY = "facturation.todo.project.v1";
 const PROJECT_TASK_SEEN_STORAGE_KEY = "facturation.todo.project-task-seen.v1";
 type TodoView = "list" | "kanban";
-type ProjectFormInput = {
-  name: string;
-};
 const TODO_LIST_STATUSES = [
   "TODO",
   "IN_PROGRESS",
@@ -333,7 +327,7 @@ export function TodoWorkspace({
   promptTemplate: string;
   appUrl: string;
 }) {
-  const [projects, setProjects] = useState(initialProjects);
+  const [projects] = useState(initialProjects);
   const [tasks, setTasks] = useState(() => normalizeOrders(initialTasks));
   const [view, setView] = useState<TodoView>("list");
   const [selectedProjectId, setSelectedProjectId] = useState(
@@ -346,12 +340,6 @@ export function TodoWorkspace({
     useState(false);
   const [createStatus, setCreateStatus] = useState<TodoStatus | null>(null);
   const [editingTask, setEditingTask] = useState<TodoTaskView | null>(null);
-  const [projectDialog, setProjectDialog] = useState<{
-    mode: "create" | "edit";
-    project?: TodoProjectView;
-  } | null>(null);
-  const [projectToDelete, setProjectToDelete] =
-    useState<TodoProjectView | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<TodoTaskView | null>(null);
   const [implementationDialogTask, setImplementationDialogTask] =
     useState<TodoTaskView | null>(null);
@@ -452,13 +440,6 @@ export function TodoWorkspace({
     [tasks, selectedProjectId],
   );
   const grouped = useMemo(() => tasksByStatus(activeTasks), [activeTasks]);
-  const taskCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const task of tasks) {
-      counts.set(task.projectId, (counts.get(task.projectId) ?? 0) + 1);
-    }
-    return counts;
-  }, [tasks]);
   const activeHermesTaskIds = useMemo(
     () =>
       tasks
@@ -566,60 +547,6 @@ export function TodoWorkspace({
 
     setTasks(nextTasks);
     persistReorder(nextProjectTasks, previous);
-  }
-
-  function createProject(input: ProjectFormInput) {
-    startTransition(async () => {
-      const result = await createTodoProjectAction(input);
-      if ("error" in result && result.error) {
-        toast.error(result.error);
-        return;
-      }
-      const project = "project" in result ? result.project : null;
-      if (!project) return;
-      setProjects((current) => [...current, project]);
-      setSelectedProjectId(project.id);
-      setProjectDialog(null);
-      toast.success("Projet créé");
-    });
-  }
-
-  function updateProject(project: TodoProjectView, input: ProjectFormInput) {
-    markPending(project.id, true);
-    startTransition(async () => {
-      const result = await updateTodoProjectAction(project.id, input);
-      markPending(project.id, false);
-      if ("error" in result && result.error) {
-        toast.error(result.error);
-        return;
-      }
-      const updatedProject = "project" in result ? result.project : null;
-      if (!updatedProject) return;
-      setProjects((current) =>
-        current.map((item) => (item.id === project.id ? updatedProject : item)),
-      );
-      setProjectDialog(null);
-      toast.success("Projet mis à jour");
-    });
-  }
-
-  function deleteProject(project: TodoProjectView) {
-    markPending(project.id, true);
-    startTransition(async () => {
-      const result = await deleteTodoProjectAction(project.id);
-      markPending(project.id, false);
-      if ("error" in result && result.error) {
-        toast.error(result.error);
-        return;
-      }
-      setProjects((current) => current.filter((item) => item.id !== project.id));
-      setSelectedProjectId((current) => {
-        if (current !== project.id) return current;
-        return projects.find((item) => item.id !== project.id)?.id ?? "";
-      });
-      setProjectToDelete(null);
-      toast.success("Projet supprimé");
-    });
   }
 
   function createTask(input: {
@@ -828,79 +755,22 @@ export function TodoWorkspace({
       {projects.length === 0 ? (
         <div className="rounded-[24px] border border-[#2b2b30] bg-[#1d1d21] p-12 text-center">
           <p className="text-sm text-[#777780]">
-            Aucun projet pour l&apos;instant.
+            Aucun projet Todo disponible. Crée ou sélectionne un projet depuis la
+            navigation Projets pour afficher ses tâches ici.
           </p>
-          <Button
-            className="mt-4"
-            onClick={() => setProjectDialog({ mode: "create" })}
-          >
-            <Plus className="size-4" />
-            Créer un projet
-          </Button>
         </div>
       ) : (
         <div className="mx-auto min-w-0 max-w-[1680px]">
           <div className="mb-4 flex flex-col gap-3 rounded-[18px] border border-[#2b2b30] bg-[#1d1d21] p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 sm:max-w-sm">
-              <Label className="sr-only" htmlFor="todo-project-select">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#777780]">
                 Projet Todo
-              </Label>
-              <Select
-                value={selectedProjectId}
-                onValueChange={(value) => {
-                  if (value) setSelectedProjectId(value);
-                }}
-              >
-                <SelectTrigger
-                  id="todo-project-select"
-                  className="h-9 border-[#2d2d32] bg-[#17171a] text-[#f2f2f4]"
-                >
-                  <SelectValue placeholder="Choisir un projet" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id}>
-                      {project.name} ({taskCounts.get(project.id) ?? 0} tâche
-                      {(taskCounts.get(project.id) ?? 0) > 1 ? "s" : ""})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              </p>
+              <h1 className="truncate text-lg font-semibold text-[#f2f2f4]">
+                {activeProject?.name ?? "Projet"}
+              </h1>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setProjectDialog({ mode: "create" })}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
-              >
-                <Plus className="size-4" />
-                Créer un projet
-              </button>
-              {activeProject && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setProjectDialog({ mode: "edit", project: activeProject })}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
-                  >
-                    Modifier le projet
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProjectToDelete(activeProject)}
-                    disabled={(taskCounts.get(activeProject.id) ?? 0) > 0 || pendingIds.has(activeProject.id)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
-                    title={
-                      (taskCounts.get(activeProject.id) ?? 0) > 0
-                        ? "Impossible de supprimer un projet avec des tâches"
-                        : "Supprimer le projet"
-                    }
-                  >
-                    <Trash2 className="size-4" />
-                    Supprimer le projet
-                  </button>
-                </>
-              )}
               <button
                 type="button"
                 onClick={() => setEmailImportOpen(true)}
@@ -908,14 +778,6 @@ export function TodoWorkspace({
               >
                 <MailPlus className="size-4" />
                 Importer un email
-              </button>
-              <button
-                type="button"
-                onClick={() => setSummaryOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#2d2d32] bg-[#17171a] px-3 py-1.5 text-[13px] font-medium text-[#f2f2f4] transition-colors hover:bg-[#24242a]"
-              >
-                <Sparkles className="size-4" />
-                Résumé IA
               </button>
             </div>
           </div>
@@ -937,28 +799,13 @@ export function TodoWorkspace({
                 else startTaskImplementation(task);
               }}
               onValidateImplementation={validateTaskImplementation}
+              onOpenSummary={() => setSummaryOpen(true)}
             />
           </DndContext>
           <p className="pt-3 text-center text-[11px] text-[#60606c]">v2.21.9</p>
         </div>
       )}
 
-      <TodoProjectDialog
-        key={projectDialog?.project?.id ?? projectDialog?.mode ?? "closed"}
-        open={projectDialog !== null}
-        project={projectDialog?.project}
-        pending={isPending}
-        onOpenChange={(open) => {
-          if (!open) setProjectDialog(null);
-        }}
-        onSubmit={(input) => {
-          if (projectDialog?.mode === "edit" && projectDialog.project) {
-            updateProject(projectDialog.project, input);
-          } else {
-            createProject(input);
-          }
-        }}
-      />
       <TodoTaskDialog
         key={`create-${createStatus ?? "closed"}`}
         open={createStatus !== null}
@@ -995,17 +842,6 @@ export function TodoWorkspace({
           if (!implementationDialogTask) return;
           startTaskImplementation(implementationDialogTask, instructions);
           setImplementationDialogTask(null);
-        }}
-      />
-      <DeleteProjectDialog
-        project={projectToDelete}
-        taskCount={projectToDelete ? (taskCounts.get(projectToDelete.id) ?? 0) : 0}
-        pending={Boolean(projectToDelete && pendingIds.has(projectToDelete.id))}
-        onOpenChange={(open) => {
-          if (!open) setProjectToDelete(null);
-        }}
-        onConfirm={() => {
-          if (projectToDelete) deleteProject(projectToDelete);
         }}
       />
       <DeleteTaskDialog
@@ -1388,6 +1224,7 @@ type TodoLinearViewProps = TodoViewProps & {
   onCopyPrompt: (task: TodoTaskView) => void;
   onStartImplementation: (task: TodoTaskView) => void;
   onValidateImplementation: (task: TodoTaskView) => void;
+  onOpenSummary: () => void;
 };
 
 function TodoLinearListView({
@@ -1400,6 +1237,7 @@ function TodoLinearListView({
   onCopyPrompt,
   onStartImplementation,
   onValidateImplementation,
+  onOpenSummary,
 }: TodoLinearViewProps) {
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TodoStatus>>(
     () => new Set(["DONE"]),
@@ -1431,6 +1269,7 @@ function TodoLinearListView({
           onCopyPrompt={onCopyPrompt}
           onStartImplementation={onStartImplementation}
           onValidateImplementation={onValidateImplementation}
+          onOpenSummary={onOpenSummary}
         />
       ))}
     </div>
@@ -1450,6 +1289,7 @@ function TodoLinearSection({
   onCopyPrompt,
   onStartImplementation,
   onValidateImplementation,
+  onOpenSummary,
 }: Omit<TodoLinearViewProps, "grouped"> & {
   status: TodoStatus;
   tasks: TodoTaskView[];
@@ -1484,14 +1324,26 @@ function TodoLinearSection({
           </h2>
           <span className="text-[13px] leading-none text-[#777780]">{tasks.length}</span>
         </button>
-        <button
-          type="button"
-          className="grid size-7 shrink-0 place-items-center rounded-full text-[#f2f2f4] transition-colors hover:bg-white/[0.06]"
-          onClick={() => onCreate(status)}
-          aria-label={`Créer dans ${TODO_STATUS_LABELS[status]}`}
-        >
-          <Plus className="size-5 stroke-[2.2]" />
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {status === "TO_TEST" && (
+            <button
+              type="button"
+              onClick={onOpenSummary}
+              className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[#2d2d32] px-2.5 text-[12px] font-medium text-[#f2f2f4] transition-colors hover:bg-white/[0.06]"
+            >
+              <Sparkles className="size-3.5" />
+              Résumé IA
+            </button>
+          )}
+          <button
+            type="button"
+            className="grid size-7 place-items-center rounded-full text-[#f2f2f4] transition-colors hover:bg-white/[0.06]"
+            onClick={() => onCreate(status)}
+            aria-label={`Créer dans ${TODO_STATUS_LABELS[status]}`}
+          >
+            <Plus className="size-5 stroke-[2.2]" />
+          </button>
+        </div>
       </div>
       {!collapsed && (
         <SortableContext
@@ -1783,57 +1635,6 @@ type SortableTaskProps = {
   onAdvance: (task: TodoTaskView) => void;
 };
 
-function TodoProjectDialog({
-  open,
-  project,
-  pending,
-  onOpenChange,
-  onSubmit,
-}: {
-  open: boolean;
-  project?: TodoProjectView;
-  pending: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (input: ProjectFormInput) => void;
-}) {
-  const [name, setName] = useState(project?.name ?? "");
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{project ? "Configurer le projet" : "Créer un projet"}</DialogTitle>
-          <DialogDescription>
-            Le nom du projet suffit. Quand tu lances une implémentation, l’app envoie la tâche et le projet à Hermes sur le VPS, qui résout lui-même le dépôt concerné.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmit({ name });
-          }}
-        >
-          <div className="space-y-2">
-            <Label htmlFor="todo-project-name">Nom</Label>
-            <Input
-              id="todo-project-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button type="submit" disabled={pending || !name.trim()}>
-              {pending ? "Enregistrement..." : "Enregistrer"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function TodoTaskDialog({
   open,
   task,
@@ -2026,44 +1827,6 @@ function TodoTaskDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DeleteProjectDialog({
-  project,
-  taskCount,
-  pending,
-  onOpenChange,
-  onConfirm,
-}: {
-  project: TodoProjectView | null;
-  taskCount: number;
-  pending: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <AlertDialog open={project !== null} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Supprimer le projet ?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {taskCount > 0
-              ? "Ce projet contient des tâches et ne peut pas être supprimé."
-              : `Le projet ${project?.name ?? ""} sera supprimé définitivement.`}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Annuler</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={pending || taskCount > 0}
-            onClick={onConfirm}
-          >
-            Supprimer
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
