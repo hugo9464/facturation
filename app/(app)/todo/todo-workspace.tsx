@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -46,6 +47,7 @@ import {
   startTodoImplementationAction,
   summarizeTodoTasksAction,
   updateTodoTaskAction,
+  uploadTodoTaskAttachmentAction,
   validateTodoImplementationAction,
   type TodoProjectView,
   type TodoTaskView,
@@ -87,6 +89,7 @@ import {
   TODO_STATUSES,
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
+import { parseTodoDescriptionParts } from "@/lib/todo-description-preview";
 import { cn } from "@/lib/utils";
 import {
   canRequestHermesMerge,
@@ -314,6 +317,67 @@ function buildImplementationPrompt(
     taskId: task.id,
     previewToken: task.previewToken ?? "",
   });
+}
+
+function insertAtCursor(text: string, insert: string, start: number, end: number) {
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  const prefix = before && !before.endsWith("\n") ? "\n" : "";
+  const suffix = after && !after.startsWith("\n") ? "\n" : "";
+  return `${before}${prefix}${insert}${suffix}${after}`;
+}
+
+function TodoDescriptionPreview({ description }: { description: string }) {
+  const parts = parseTodoDescriptionParts(description).filter(
+    (part) => part.type !== "text" || part.text.trim(),
+  );
+  if (parts.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm leading-7">
+      <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Aperçu de la description
+      </div>
+      <div className="whitespace-pre-wrap text-muted-foreground">
+        {parts.map((part, index) => {
+          if (part.type === "image") {
+            return (
+              <a
+                key={`${part.url}-${index}`}
+                href={part.url}
+                target="_blank"
+                rel="noreferrer"
+                className="mx-1 inline-flex align-middle"
+                title={part.alt}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={part.url}
+                  alt={part.alt}
+                  className="inline-block size-16 rounded-md border border-border bg-background object-cover shadow-sm transition-transform hover:scale-[1.03]"
+                />
+              </a>
+            );
+          }
+          if (part.type === "link") {
+            return (
+              <a
+                key={`${part.url}-${index}`}
+                href={part.url}
+                target="_blank"
+                rel="noreferrer"
+                className="mx-1 inline-flex max-w-52 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground underline-offset-4 align-middle hover:bg-muted hover:text-foreground hover:underline"
+              >
+                <ExternalLink className="size-3" />
+                <span className="truncate">{part.label}</span>
+              </a>
+            );
+          }
+          return <React.Fragment key={`${part.text}-${index}`}>{part.text}</React.Fragment>;
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function TodoWorkspace({
@@ -1657,6 +1721,8 @@ function TodoTaskDialog({
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [selectedStatus, setSelectedStatus] = useState<TodoStatus>(status);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const descriptionRef = React.useRef<HTMLTextAreaElement | null>(null);
   const instructionHistory = (task?.implementationJobs ?? [])
     .filter((job) => job.instructions?.trim())
     .sort(
@@ -1682,9 +1748,61 @@ function TodoTaskDialog({
     : "default";
   const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
 
+  async function uploadAttachment(
+    file: File | undefined,
+    selection?: { start: number; end: number },
+  ) {
+    if (!file) return;
+    setUploadingAttachment(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    if (task?.id) formData.append("taskId", task.id);
+    try {
+      const result = await uploadTodoTaskAttachmentAction(formData);
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        return;
+      }
+      const attachment = "attachment" in result ? result.attachment : null;
+      const markdown = attachment?.markdown ?? "";
+      if (!markdown) return;
+      const textarea = descriptionRef.current;
+      const start = selection?.start ?? textarea?.selectionStart ?? description.length;
+      const end = selection?.end ?? textarea?.selectionEnd ?? description.length;
+      const nextDescription = insertAtCursor(description, markdown, start, end);
+      setDescription(nextDescription);
+      toast.success(
+        file.type.startsWith("image/")
+          ? "Image ajoutée à la description"
+          : "Pièce jointe ajoutée à la description",
+      );
+      window.requestAnimationFrame(() => {
+        textarea?.focus();
+        const position = Math.min(nextDescription.length, start + markdown.length + 1);
+        textarea?.setSelectionRange(position, position);
+      });
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
+  function handleDescriptionPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const image = Array.from(event.clipboardData.items)
+      .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+      ?.getAsFile();
+    if (!image) return;
+
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    void uploadAttachment(image, {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    });
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{task ? "Modifier la tâche" : "Créer une tâche"}</DialogTitle>
           <DialogDescription>
@@ -1709,13 +1827,35 @@ function TodoTaskDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="todo-description">Description</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="todo-description">Description</Label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <Upload className="size-3.5" />
+                {uploadingAttachment ? "Upload..." : "Ajouter image/fichier"}
+                <input
+                  type="file"
+                  className="sr-only"
+                  disabled={uploadingAttachment || pending}
+                  onChange={(event) => {
+                    void uploadAttachment(event.target.files?.[0]);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            </div>
             <Textarea
+              ref={descriptionRef}
               id="todo-description"
-              rows={3}
+              rows={6}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
+              onPaste={handleDescriptionPaste}
+              placeholder="Écris le contexte. Colle une image au milieu du texte, ou ajoute une image/fichier pour insérer un lien Markdown utilisable dans le prompt Hermes."
             />
+            <p className="text-xs text-muted-foreground">
+              Colle une image directement dans le texte: elle est uploadée puis insérée à l’emplacement du curseur. Les fichiers restent des liens Markdown transmis à Hermes dans le prompt.
+            </p>
+            <TodoDescriptionPreview description={description} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="todo-status">Statut</Label>

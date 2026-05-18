@@ -34,6 +34,16 @@ import {
   MERGE_TASK_EVENT,
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
+import { createClient as createSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  ensureTodoAttachmentBucketExists,
+  isTodoAttachmentBucketMissing,
+  safeTodoAttachmentName,
+  TODO_ATTACHMENT_BUCKET,
+  TODO_ATTACHMENT_MAX_BYTES,
+  todoAttachmentMarkdown,
+} from "@/lib/todo-attachments";
 import {
   canRequestHermesMerge,
   getHermesImplementationTestingContract,
@@ -79,6 +89,10 @@ const updateSchema = z.object({
   title: z.string().trim().min(1, "Titre requis"),
   description: z.string().trim().optional(),
   status: statusSchema,
+});
+
+const todoAttachmentSchema = z.object({
+  taskId: z.string().uuid().optional(),
 });
 
 const reorderSchema = z.array(
@@ -349,6 +363,79 @@ export async function deleteTodoProjectAction(id: string) {
   revalidatePath("/todo");
   revalidatePath("/projects");
   return { id: data.id };
+}
+
+export async function uploadTodoTaskAttachmentAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = todoAttachmentSchema.safeParse({
+    taskId: formData.get("taskId") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "Choisis un fichier à joindre" };
+  }
+  if (file.size > TODO_ATTACHMENT_MAX_BYTES) {
+    return { error: "Fichier trop lourd (8 Mo maximum)" };
+  }
+
+  const safeName = safeTodoAttachmentName(file.name);
+  const folder = parsed.data.taskId ?? "draft";
+  const path = `${user.id}/${folder}/${crypto.randomUUID()}-${safeName}`;
+  const contentType = file.type || "application/octet-stream";
+  const storage = await createSupabase();
+  let uploadError: { message?: string } | null = null;
+  let uploadedWithAdmin = false;
+
+  const firstUpload = await storage.storage
+    .from(TODO_ATTACHMENT_BUCKET)
+    .upload(path, file, {
+      contentType,
+      upsert: false,
+    });
+  uploadError = firstUpload.error;
+
+  if (uploadError) {
+    try {
+      const admin = createAdminClient();
+      if (isTodoAttachmentBucketMissing(uploadError)) {
+        const bucket = await ensureTodoAttachmentBucketExists(admin);
+        if (!bucket.ok) return { error: `Upload pièce jointe: ${bucket.error}` };
+      }
+      const retry = await admin.storage.from(TODO_ATTACHMENT_BUCKET).upload(path, file, {
+        contentType,
+        upsert: false,
+      });
+      uploadError = retry.error;
+      uploadedWithAdmin = !retry.error;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        error: isTodoAttachmentBucketMissing(uploadError)
+          ? "Upload pièce jointe: bucket todo-attachments introuvable et création automatique indisponible"
+          : `Upload pièce jointe: ${message}`,
+      };
+    }
+  }
+
+  if (uploadError) return { error: `Upload pièce jointe: ${uploadError.message}` };
+
+  const publicUrlClient = uploadedWithAdmin ? createAdminClient() : storage;
+  const { data } = publicUrlClient.storage
+    .from(TODO_ATTACHMENT_BUCKET)
+    .getPublicUrl(path);
+  const url = data.publicUrl;
+  return {
+    attachment: {
+      name: file.name,
+      url,
+      contentType,
+      markdown: todoAttachmentMarkdown(file.name, url, contentType),
+    },
+  };
 }
 
 export async function createTodoTaskAction(input: unknown) {
