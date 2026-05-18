@@ -34,6 +34,7 @@ import {
   MERGE_TASK_EVENT,
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
+import { createClient as createSupabase } from "@/lib/supabase/server";
 import {
   canRequestHermesMerge,
   getHermesImplementationTestingContract,
@@ -80,6 +81,32 @@ const updateSchema = z.object({
   description: z.string().trim().optional(),
   status: statusSchema,
 });
+
+const TODO_ATTACHMENT_BUCKET = "todo-attachments";
+const TODO_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+const TODO_ATTACHMENT_SAFE_NAME_RE = /[^a-zA-Z0-9._-]+/g;
+
+const todoAttachmentSchema = z.object({
+  taskId: z.string().uuid().optional(),
+});
+
+function safeAttachmentName(name: string) {
+  const cleaned = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(TODO_ATTACHMENT_SAFE_NAME_RE, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 96);
+  return cleaned || "piece-jointe";
+}
+
+function todoAttachmentMarkdown(name: string, url: string, type: string) {
+  const escapedName = name.replace(/[\[\]]/g, "");
+  return type.startsWith("image/")
+    ? `![${escapedName}](${url})`
+    : `[${escapedName}](${url})`;
+}
 
 const reorderSchema = z.array(
   z.object({
@@ -349,6 +376,47 @@ export async function deleteTodoProjectAction(id: string) {
   revalidatePath("/todo");
   revalidatePath("/projects");
   return { id: data.id };
+}
+
+export async function uploadTodoTaskAttachmentAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = todoAttachmentSchema.safeParse({
+    taskId: formData.get("taskId") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Données invalides" };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "Choisis un fichier à joindre" };
+  }
+  if (file.size > TODO_ATTACHMENT_MAX_BYTES) {
+    return { error: "Fichier trop lourd (8 Mo maximum)" };
+  }
+
+  const safeName = safeAttachmentName(file.name);
+  const folder = parsed.data.taskId ?? "draft";
+  const path = `${user.id}/${folder}/${crypto.randomUUID()}-${safeName}`;
+  const storage = await createSupabase();
+  const { error: uploadError } = await storage.storage
+    .from(TODO_ATTACHMENT_BUCKET)
+    .upload(path, file, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    });
+  if (uploadError) return { error: `Upload pièce jointe: ${uploadError.message}` };
+
+  const { data } = storage.storage.from(TODO_ATTACHMENT_BUCKET).getPublicUrl(path);
+  const url = data.publicUrl;
+  return {
+    attachment: {
+      name: file.name,
+      url,
+      contentType: file.type || "application/octet-stream",
+      markdown: todoAttachmentMarkdown(file.name, url, file.type || ""),
+    },
+  };
 }
 
 export async function createTodoTaskAction(input: unknown) {
