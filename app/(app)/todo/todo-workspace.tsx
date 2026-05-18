@@ -99,6 +99,7 @@ import {
   type TodoPullRequestState,
 } from "@/lib/todo-implementation-workflow";
 import { formatDate } from "@/lib/dates";
+import { buildTodoTaskPreviewUrl } from "@/lib/todo-preview-link";
 
 const VIEW_STORAGE_KEY = "facturation.todo.view.v1";
 const PROJECT_STORAGE_KEY = "facturation.todo.project.v1";
@@ -1488,6 +1489,7 @@ function SortableLinearTaskRow({
     errorMessage: task.implementationJob?.errorMessage,
   });
   const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
+  const taskPreviewUrl = buildTodoTaskPreviewUrl(task.previewUrl, task.projectId);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1553,9 +1555,9 @@ function SortableLinearTaskRow({
               <GitPullRequest className="size-3.5 stroke-[1.9]" />
             </a>
           ) : null}
-          {task.previewUrl ? (
+          {taskPreviewUrl ? (
             <a
-              href={task.previewUrl}
+              href={taskPreviewUrl}
               target="_blank"
               rel="noreferrer"
               onClick={(event) => event.stopPropagation()}
@@ -1747,6 +1749,9 @@ function TodoTaskDialog({
       })
     : "default";
   const pullRequestTitle = pullRequestButtonTitle(pullRequestState);
+  const taskPreviewUrl = task
+    ? buildTodoTaskPreviewUrl(task.previewUrl, task.projectId)
+    : null;
 
   async function uploadAttachment(
     file: File | undefined,
@@ -1882,9 +1887,9 @@ function TodoTaskDialog({
               Date de fin : {formatDate(task.completedAt)}
             </p>
           )}
-          {(task?.prUrl || task?.previewUrl) && (
+          {(task?.prUrl || taskPreviewUrl) && (
             <div className="flex flex-wrap gap-2">
-              {task.prUrl && (
+              {task?.prUrl && (
                 <a
                   href={task.prUrl}
                   target="_blank"
@@ -1896,9 +1901,9 @@ function TodoTaskDialog({
                   Pull Request
                 </a>
               )}
-              {task.previewUrl && (
+              {taskPreviewUrl && (
                 <a
-                  href={task.previewUrl}
+                  href={taskPreviewUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -1946,9 +1951,9 @@ function TodoTaskDialog({
             <div className="space-y-1 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-muted-foreground">
               <p className="font-semibold text-emerald-300">Instructions de test Hermes</p>
               <p className="whitespace-pre-wrap leading-relaxed">{testInstructions}</p>
-              {task?.previewUrl && (
+              {taskPreviewUrl && (
                 <a
-                  href={task.previewUrl}
+                  href={taskPreviewUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 font-medium text-emerald-300 underline-offset-4 hover:underline"
