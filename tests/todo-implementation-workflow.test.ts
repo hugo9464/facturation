@@ -9,6 +9,7 @@ import {
   extractHermesTestInstructions,
   getHermesImplementationTestingContract,
   getHermesProgressView,
+  getHermesStatusTransition,
   getTodoPullRequestState,
   isHermesJobActive,
   getTodoStatusAfterHermesStart,
@@ -63,6 +64,34 @@ assert.equal(isHermesJobActive("QUEUED"), true);
 assert.equal(isHermesJobActive("RUNNING"), true);
 assert.equal(isHermesJobActive("WAITING_PREVIEW"), true);
 assert.equal(isHermesJobActive("SUCCEEDED"), false);
+
+assert.deepEqual(
+  getHermesStatusTransition({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "RUNNING",
+    jobAgent: "hermes",
+  }),
+  { from: "TODO", to: "IN_PROGRESS" },
+  "an active Hermes implementation should be displayed between todo and in-progress",
+);
+assert.equal(
+  getHermesStatusTransition({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "SUCCEEDED",
+    jobAgent: "hermes",
+  }),
+  null,
+  "completed implementation jobs should return to the normal status column",
+);
+assert.equal(
+  getHermesStatusTransition({
+    taskStatus: "IN_PROGRESS",
+    jobStatus: "RUNNING",
+    jobAgent: "hermes-merge",
+  }),
+  null,
+  "merge jobs should not use the implementation transition lane",
+);
 
 assert.equal(
   getTodoStatusAfterHermesStart("TODO"),

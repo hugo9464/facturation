@@ -94,8 +94,10 @@ import { cn } from "@/lib/utils";
 import {
   canRequestHermesMerge,
   getHermesProgressView,
+  getHermesStatusTransition,
   getTodoPullRequestState,
   isHermesJobActive,
+  type HermesStatusTransition,
   type TodoPullRequestState,
 } from "@/lib/todo-implementation-workflow";
 import { formatDate } from "@/lib/dates";
@@ -193,6 +195,39 @@ function tasksByStatus(tasks: TodoTaskView[]) {
       return acc;
     },
     {} as Record<TodoStatus, TodoTaskView[]>,
+  );
+}
+
+function taskHermesStatusTransition(task: TodoTaskView) {
+  return getHermesStatusTransition({
+    taskStatus: task.status,
+    jobStatus: task.implementationJob?.status,
+    jobAgent: task.implementationJob?.agent,
+  });
+}
+
+function isHermesTransitionTask(task: TodoTaskView) {
+  return taskHermesStatusTransition(task) !== null;
+}
+
+function statusTransitionLabel(transition: HermesStatusTransition) {
+  return `${TODO_STATUS_LABELS[transition.from]} → ${TODO_STATUS_LABELS[transition.to]}`;
+}
+
+function tasksByHermesTransition(tasks: TodoTaskView[]) {
+  return tasks.reduce(
+    (acc, task) => {
+      const transition = taskHermesStatusTransition(task);
+      if (!transition) return acc;
+      const key = `${transition.from}->${transition.to}`;
+      acc[key] = {
+        transition,
+        tasks: [...(acc[key]?.tasks ?? []), task],
+      };
+      acc[key].tasks.sort(compareTasks);
+      return acc;
+    },
+    {} as Record<string, { transition: HermesStatusTransition; tasks: TodoTaskView[] }>,
   );
 }
 
@@ -503,7 +538,15 @@ export function TodoWorkspace({
     () => tasks.filter((task) => task.projectId === selectedProjectId),
     [tasks, selectedProjectId],
   );
-  const grouped = useMemo(() => tasksByStatus(activeTasks), [activeTasks]);
+  const visibleActiveTasks = useMemo(
+    () => activeTasks.filter((task) => !isHermesTransitionTask(task)),
+    [activeTasks],
+  );
+  const grouped = useMemo(() => tasksByStatus(visibleActiveTasks), [visibleActiveTasks]);
+  const hermesTransitions = useMemo(
+    () => tasksByHermesTransition(activeTasks),
+    [activeTasks],
+  );
   const activeHermesTaskIds = useMemo(
     () =>
       tasks
@@ -852,6 +895,7 @@ export function TodoWorkspace({
           >
             <TodoLinearListView
               grouped={grouped}
+              hermesTransitions={hermesTransitions}
               pendingIds={pendingIds}
               onCreate={setCreateStatus}
               onEdit={setEditingTask}
@@ -1277,6 +1321,10 @@ function TodoImplementationInstructionsDialog({
 
 type TodoViewProps = {
   grouped: Record<TodoStatus, TodoTaskView[]>;
+  hermesTransitions: Record<
+    string,
+    { transition: HermesStatusTransition; tasks: TodoTaskView[] }
+  >;
   pendingIds: Set<string>;
   onCreate: (status: TodoStatus) => void;
   onEdit: (task: TodoTaskView) => void;
@@ -1293,6 +1341,7 @@ type TodoLinearViewProps = TodoViewProps & {
 
 function TodoLinearListView({
   grouped,
+  hermesTransitions,
   pendingIds,
   onCreate,
   onEdit,
@@ -1318,24 +1367,41 @@ function TodoLinearListView({
 
   return (
     <div className="space-y-7">
-      {statuses.map((status) => (
-        <TodoLinearSection
-          key={status}
-          status={status}
-          tasks={grouped[status]}
-          collapsed={collapsedStatuses.has(status)}
-          pendingIds={pendingIds}
-          onCreate={onCreate}
-          onToggleCollapse={toggleStatus}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onAdvance={onAdvance}
-          onCopyPrompt={onCopyPrompt}
-          onStartImplementation={onStartImplementation}
-          onValidateImplementation={onValidateImplementation}
-          onOpenSummary={onOpenSummary}
-        />
-      ))}
+      {statuses.map((status) => {
+        const transition = hermesTransitions[`${status}->${TODO_STATUSES[TODO_STATUSES.indexOf(status) + 1] ?? ""}`];
+        return (
+          <React.Fragment key={status}>
+            <TodoLinearSection
+              status={status}
+              tasks={grouped[status]}
+              collapsed={collapsedStatuses.has(status)}
+              pendingIds={pendingIds}
+              onCreate={onCreate}
+              onToggleCollapse={toggleStatus}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onAdvance={onAdvance}
+              onCopyPrompt={onCopyPrompt}
+              onStartImplementation={onStartImplementation}
+              onValidateImplementation={onValidateImplementation}
+              onOpenSummary={onOpenSummary}
+            />
+            {transition && transition.tasks.length > 0 ? (
+              <TodoHermesTransitionSection
+                transition={transition.transition}
+                tasks={transition.tasks}
+                pendingIds={pendingIds}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onAdvance={onAdvance}
+                onCopyPrompt={onCopyPrompt}
+                onStartImplementation={onStartImplementation}
+                onValidateImplementation={onValidateImplementation}
+              />
+            ) : null}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -1354,7 +1420,7 @@ function TodoLinearSection({
   onStartImplementation,
   onValidateImplementation,
   onOpenSummary,
-}: Omit<TodoLinearViewProps, "grouped"> & {
+}: Omit<TodoLinearViewProps, "grouped" | "hermesTransitions"> & {
   status: TodoStatus;
   tasks: TodoTaskView[];
   collapsed: boolean;
@@ -1437,6 +1503,61 @@ function TodoLinearSection({
           </div>
         </SortableContext>
       )}
+    </section>
+  );
+}
+
+function TodoHermesTransitionSection({
+  transition,
+  tasks,
+  pendingIds,
+  onEdit,
+  onDelete,
+  onAdvance,
+  onCopyPrompt,
+  onStartImplementation,
+  onValidateImplementation,
+}: Omit<TodoLinearViewProps, "grouped" | "hermesTransitions" | "onCreate" | "onOpenSummary"> & {
+  transition: HermesStatusTransition;
+  tasks: TodoTaskView[];
+}) {
+  return (
+    <section className="px-2 sm:px-3" aria-label={statusTransitionLabel(transition)}>
+      <div className="mb-3 flex items-center gap-2.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-sky-300/90">
+        <span
+          className={cn("size-3 shrink-0 rounded-full border", statusDotClass(transition.from))}
+          aria-hidden="true"
+        />
+        <span className="h-px min-w-5 flex-1 bg-sky-400/30" aria-hidden="true" />
+        <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2 py-1 leading-none">
+          Hermes en transition · {statusTransitionLabel(transition)}
+        </span>
+        <span className="h-px min-w-5 flex-1 bg-sky-400/30" aria-hidden="true" />
+        <span
+          className={cn("size-3 shrink-0 rounded-full border", statusDotClass(transition.to))}
+          aria-hidden="true"
+        />
+      </div>
+      <SortableContext
+        items={tasks.map((task) => task.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className="overflow-hidden rounded-xl border border-sky-400/25 bg-sky-400/[0.07] shadow-[0_0_24px_rgba(56,189,248,0.08)]">
+          {tasks.map((task) => (
+            <SortableLinearTaskRow
+              key={task.id}
+              task={task}
+              pending={pendingIds.has(task.id)}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onAdvance={onAdvance}
+              onCopyPrompt={onCopyPrompt}
+              onStartImplementation={onStartImplementation}
+              onValidateImplementation={onValidateImplementation}
+            />
+          ))}
+        </div>
+      </SortableContext>
     </section>
   );
 }
