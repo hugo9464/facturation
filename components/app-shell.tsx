@@ -118,7 +118,7 @@ export function AppShell({
   }, [currentProjectId, projectTaskUpdateTimes, seenProjectTaskUpdatesLoaded]);
 
   return (
-    <div className="flex min-h-screen w-full bg-background">
+    <div className="flex min-h-screen w-full overflow-x-hidden bg-background">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex md:w-60 md:flex-col md:border-r md:bg-sidebar md:text-sidebar-foreground">
         <div className="border-b border-sidebar-border px-5 py-4">
@@ -240,10 +240,12 @@ export function AppShell({
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur md:px-6">
-          <div className="md:hidden text-base font-semibold">Facturation</div>
+        <header className="sticky top-0 z-10 flex h-14 min-w-0 items-center justify-between gap-2 border-b bg-background/95 px-3 backdrop-blur sm:px-4 md:px-6">
+          <Link href="/" className="min-w-0 truncate text-base font-semibold md:hidden">
+            Facturation
+          </Link>
           <div className="flex-1" />
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
             <HermesTerminalDialog />
             <TimeEntryDialog projects={projects}>
               <Button size="sm" className="gap-1.5">
@@ -254,32 +256,34 @@ export function AppShell({
             </TimeEntryDialog>
           </div>
         </header>
-        <main className="flex-1 px-4 py-6 pb-20 md:px-6 md:pb-6">
+        <main className="min-w-0 flex-1 px-3 py-5 pb-[calc(5.25rem+env(safe-area-inset-bottom))] sm:px-4 md:px-6 md:py-6 md:pb-6">
           {children}
         </main>
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-7 border-t bg-background/95 backdrop-blur md:hidden">
-        {NAV.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(pathname, item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1 py-2.5 text-[11px]",
-                active
-                  ? "text-foreground font-medium"
-                  : "text-muted-foreground",
-              )}
-            >
-              <Icon className="size-5" />
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+        <div className="flex overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex min-w-[4.75rem] flex-1 flex-col items-center justify-center gap-1 px-2 py-2.5 text-[11px]",
+                  active
+                    ? "text-foreground font-medium"
+                    : "text-muted-foreground",
+                )}
+              >
+                <Icon className="size-5" />
+                <span className="max-w-full truncate">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </nav>
     </div>
   );
