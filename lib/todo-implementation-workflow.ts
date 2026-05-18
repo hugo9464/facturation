@@ -32,6 +32,22 @@ export function shouldMoveTaskToValidationAfterCallback({
   return jobAgent === HERMES_MERGE_AGENT && callbackStatus === "SUCCEEDED";
 }
 
+export function resolveCallbackErrorMessage({
+  callbackStatus,
+  callbackErrorMessage,
+  hasCallbackErrorMessage,
+  storedErrorMessage,
+}: {
+  callbackStatus: TodoImplementationJobStatus;
+  callbackErrorMessage: string | null | undefined;
+  hasCallbackErrorMessage: boolean;
+  storedErrorMessage: string | null;
+}) {
+  if (callbackStatus === "SUCCEEDED") return null;
+  if (hasCallbackErrorMessage) return callbackErrorMessage ?? null;
+  return storedErrorMessage;
+}
+
 export function canRequestHermesMerge({
   taskStatus,
   jobStatus,

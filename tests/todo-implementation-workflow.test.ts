@@ -13,6 +13,7 @@ import {
   getTodoPullRequestState,
   isHermesJobActive,
   getTodoStatusAfterHermesStart,
+  resolveCallbackErrorMessage,
 } from "../lib/todo-implementation-workflow";
 
 assert.equal(
@@ -31,6 +32,39 @@ assert.equal(
   }),
   true,
   "a merge success must move the task to validation",
+);
+
+assert.equal(
+  resolveCallbackErrorMessage({
+    callbackStatus: "SUCCEEDED",
+    callbackErrorMessage: undefined,
+    hasCallbackErrorMessage: false,
+    storedErrorMessage: "GraphQL: Could not resolve to a Repository",
+  }),
+  null,
+  "a successful callback must clear a stale error even when errorMessage is omitted",
+);
+
+assert.equal(
+  resolveCallbackErrorMessage({
+    callbackStatus: "FAILED",
+    callbackErrorMessage: null,
+    hasCallbackErrorMessage: true,
+    storedErrorMessage: "old error",
+  }),
+  null,
+  "an explicit null errorMessage must clear the stored error",
+);
+
+assert.equal(
+  resolveCallbackErrorMessage({
+    callbackStatus: "RUNNING",
+    callbackErrorMessage: undefined,
+    hasCallbackErrorMessage: false,
+    storedErrorMessage: "previous diagnostic",
+  }),
+  "previous diagnostic",
+  "non-terminal callbacks without errorMessage keep the current diagnostic",
 );
 
 assert.equal(

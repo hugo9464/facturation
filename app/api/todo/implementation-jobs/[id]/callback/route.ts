@@ -8,7 +8,10 @@ import {
   getImplementationCallbackSecret,
   implementationCallbackTokenFor,
 } from "@/lib/hermes-automation";
-import { shouldMoveTaskToValidationAfterCallback } from "@/lib/todo-implementation-workflow";
+import {
+  resolveCallbackErrorMessage,
+  shouldMoveTaskToValidationAfterCallback,
+} from "@/lib/todo-implementation-workflow";
 import { buildPreviewAccessUrlFromEnv } from "@/lib/preview-access";
 
 const callbackSchema = z.object({
@@ -66,13 +69,22 @@ export async function POST(
 
   const job = toTodoImplementationJob(jobRow);
   const storedPreviewUrl = buildPreviewAccessUrlFromEnv(parsed.data.previewUrl);
+  const hasCallbackErrorMessage = Object.prototype.hasOwnProperty.call(
+    parsed.data,
+    "errorMessage",
+  );
   const update = {
     status: parsed.data.status,
     branch_name: parsed.data.branchName ?? job.branchName,
     pr_url: parsed.data.prUrl ?? job.prUrl,
     preview_url: storedPreviewUrl ?? job.previewUrl,
     logs: parsed.data.logs ?? job.logs,
-    error_message: parsed.data.errorMessage ?? job.errorMessage,
+    error_message: resolveCallbackErrorMessage({
+      callbackStatus: parsed.data.status,
+      callbackErrorMessage: parsed.data.errorMessage,
+      hasCallbackErrorMessage,
+      storedErrorMessage: job.errorMessage,
+    }),
     updated_at: new Date().toISOString(),
   };
 
