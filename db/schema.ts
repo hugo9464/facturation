@@ -29,6 +29,22 @@ export const todoImplementationJobStatusEnum = {
   ] as const,
 };
 
+export const prospectionTypeEnum = {
+  enumValues: ["OFFER", "MISSION", "COMPANY", "CONTACT"] as const,
+};
+
+export const prospectionStatusEnum = {
+  enumValues: [
+    "TO_APPLY",
+    "APPLIED",
+    "FOLLOW_UP",
+    "INTERVIEW",
+    "WON",
+    "LOST",
+    "ARCHIVED",
+  ] as const,
+};
+
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
@@ -36,6 +52,9 @@ export type TodoStatus = (typeof todoStatusEnum.enumValues)[number];
 export type TodoImplementationJobStatus =
   (typeof todoImplementationJobStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
+export type ProspectionType = (typeof prospectionTypeEnum.enumValues)[number];
+export type ProspectionStatus =
+  (typeof prospectionStatusEnum.enumValues)[number];
 
 export type Profile = {
   userId: string;
@@ -224,5 +243,29 @@ export type TodoImplementationJob = {
 
 export type NewTodoImplementationJob = Omit<
   TodoImplementationJob,
+  "id" | "createdAt" | "updatedAt"
+>;
+
+export type ProspectionEntry = {
+  id: string;
+  userId: string;
+  type: ProspectionType;
+  status: ProspectionStatus;
+  title: string;
+  organization: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  sourceUrl: string | null;
+  location: string | null;
+  targetDate: string | null;
+  appliedAt: string | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewProspectionEntry = Omit<
+  ProspectionEntry,
   "id" | "createdAt" | "updatedAt"
 >;
