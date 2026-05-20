@@ -4,6 +4,7 @@ import type {
   Invoice,
   InvoiceLine,
   Profile,
+  ProspectionEntry,
   Quote,
   QuoteLine,
   TimeEntry,
@@ -204,6 +205,27 @@ export function toTodoTask(row: Raw): TodoTask {
     previewUrl: (row.preview_url as string | null) ?? null,
     prUrl: (row.pr_url as string | null) ?? null,
     completedAt: date(row.completed_at),
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
+export function toProspectionEntry(row: Raw): ProspectionEntry {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    type: row.type as ProspectionEntry["type"],
+    status: row.status as ProspectionEntry["status"],
+    title: row.title as string,
+    organization: (row.organization as string | null) ?? null,
+    contactName: (row.contact_name as string | null) ?? null,
+    email: (row.email as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    sourceUrl: (row.source_url as string | null) ?? null,
+    location: (row.location as string | null) ?? null,
+    targetDate: (row.target_date as string | null) ?? null,
+    appliedAt: (row.applied_at as string | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };
