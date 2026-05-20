@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1] - 2026-05-20
+
+### Features
+- feat: espace prospection enrichi avec onglets de suivi, bibliothèque de CV sources, génération de CV adapté par IA et export PDF
+
+### Database
+- migration 20260520110000: table `prospection_entry` pour le suivi des opportunités
+- migration 20260520192830: tables `prospection_resume` et `prospection_cv_generation` pour les CV sources et versions générées
+
 ## [0.4.0] - 2026-05-14
 
 ### Features

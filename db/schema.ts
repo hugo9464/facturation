@@ -269,3 +269,39 @@ export type NewProspectionEntry = Omit<
   ProspectionEntry,
   "id" | "createdAt" | "updatedAt"
 >;
+
+export type ProspectionResume = {
+  id: string;
+  userId: string;
+  title: string;
+  content: string;
+  photoDataUrl: string | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewProspectionResume = Omit<
+  ProspectionResume,
+  "id" | "createdAt" | "updatedAt"
+>;
+
+export type ProspectionCvGeneration = {
+  id: string;
+  userId: string;
+  title: string;
+  offerDescription: string;
+  resumeIds: string[];
+  questions: import("@/lib/prospection-cv").CvQuestion[];
+  answers: import("@/lib/prospection-cv").CvAnswer[];
+  generatedCv: import("@/lib/prospection-cv").TailoredCv;
+  photoDataUrl: string | null;
+  model: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewProspectionCvGeneration = Omit<
+  ProspectionCvGeneration,
+  "id" | "createdAt" | "updatedAt"
+>;

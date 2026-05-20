@@ -5,6 +5,8 @@ import type {
   InvoiceLine,
   Profile,
   ProspectionEntry,
+  ProspectionCvGeneration,
+  ProspectionResume,
   Quote,
   QuoteLine,
   TimeEntry,
@@ -226,6 +228,40 @@ export function toProspectionEntry(row: Raw): ProspectionEntry {
     targetDate: (row.target_date as string | null) ?? null,
     appliedAt: (row.applied_at as string | null) ?? null,
     notes: (row.notes as string | null) ?? null,
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
+function arrayValue<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+export function toProspectionResume(row: Raw): ProspectionResume {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    title: row.title as string,
+    content: row.content as string,
+    photoDataUrl: (row.photo_data_url as string | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
+export function toProspectionCvGeneration(row: Raw): ProspectionCvGeneration {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    title: row.title as string,
+    offerDescription: row.offer_description as string,
+    resumeIds: arrayValue<string>(row.resume_ids),
+    questions: arrayValue(row.questions),
+    answers: arrayValue(row.answers),
+    generatedCv: row.generated_cv as ProspectionCvGeneration["generatedCv"],
+    photoDataUrl: (row.photo_data_url as string | null) ?? null,
+    model: (row.model as string | null) ?? "openai",
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };

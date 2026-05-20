@@ -5,6 +5,11 @@ import {
   prospectionPrimaryLine,
   sortProspectionEntries,
 } from "../lib/prospection";
+import {
+  cvGenerationTitle,
+  sortProspectionCvGenerations,
+  sortProspectionResumes,
+} from "../lib/prospection-cv";
 
 const now = new Date("2026-05-20T10:00:00Z");
 
@@ -44,6 +49,25 @@ const sorted = sortProspectionEntries([
 assert.deepEqual(
   sorted.map((entry) => `${entry.status}:${entry.type}`),
   ["TO_APPLY:OFFER", "TO_APPLY:COMPANY", "ARCHIVED:CONTACT"],
+);
+
+assert.equal(
+  cvGenerationTitle("Lead Next.js freelance\nParis"),
+  "Lead Next.js freelance",
+);
+assert.equal(
+  sortProspectionResumes([
+    { updatedAt: new Date("2026-05-19T10:00:00Z") },
+    { updatedAt: new Date("2026-05-20T10:00:00Z") },
+  ])[0]?.updatedAt.toISOString(),
+  "2026-05-20T10:00:00.000Z",
+);
+assert.equal(
+  sortProspectionCvGenerations([
+    { createdAt: new Date("2026-05-19T10:00:00Z") },
+    { createdAt: new Date("2026-05-20T10:00:00Z") },
+  ])[0]?.createdAt.toISOString(),
+  "2026-05-20T10:00:00.000Z",
 );
 
 console.log("prospection tests passed");
