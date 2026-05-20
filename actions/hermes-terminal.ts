@@ -5,7 +5,10 @@ import { requireUser } from "@/lib/auth";
 import { createHermesWebhookHeaders } from "@/lib/hermes-automation";
 import {
   buildHermesDirectInstructionPayload,
+  createHermesTerminalResponseDetails,
   getHermesTerminalWebhookConfig,
+  redactHermesTerminalString,
+  type HermesTerminalResponseDetails,
 } from "@/lib/hermes-terminal";
 
 const hermesTerminalInstructionSchema = z.object({
@@ -13,7 +16,15 @@ const hermesTerminalInstructionSchema = z.object({
   currentPath: z.string().trim().max(500).optional().nullable(),
 });
 
-export async function sendHermesTerminalInstructionAction(input: unknown) {
+type HermesTerminalInstructionActionResult = {
+  ok?: true;
+  error?: string;
+  response?: HermesTerminalResponseDetails;
+};
+
+export async function sendHermesTerminalInstructionAction(
+  input: unknown,
+): Promise<HermesTerminalInstructionActionResult> {
   const user = await requireUser();
   const parsed = hermesTerminalInstructionSchema.safeParse(input);
   if (!parsed.success) {
@@ -41,14 +52,27 @@ export async function sendHermesTerminalInstructionAction(input: unknown) {
       headers: createHermesWebhookHeaders(body, hermes.secret, hermes.event),
       body,
     });
+    const text = await response.text().catch(() => "");
+    const responseDetails = createHermesTerminalResponseDetails({
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get("content-type"),
+      bodyText: text,
+    });
+
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Hermes HTTP ${response.status}: ${text.slice(0, 240)}`);
+      return {
+        error: `Hermes HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`,
+        response: responseDetails,
+      };
     }
+
+    return { ok: true, response: responseDetails };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Échec appel Hermes";
+    const message = redactHermesTerminalString(
+      error instanceof Error ? error.message : "Échec appel Hermes",
+    );
     return { error: message };
   }
-
-  return { ok: true };
 }
