@@ -16,6 +16,11 @@ import { sendInvoiceEmail } from "@/lib/email";
 import { eurosToCents } from "@/lib/money";
 import { renderInvoicePDFToBuffer } from "@/lib/pdf-render";
 import {
+  buildSpaceManagementProductManagerLine,
+  isSpaceManagementClientName,
+  spaceManagementBillingPeriodForInvoiceMonth,
+} from "@/lib/invoice-grouping";
+import {
   getProfile,
   getSupabaseDb,
   toClient,
@@ -38,6 +43,7 @@ const draftSchema = z
     clientId: z.string().uuid(),
     periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    poNumber: z.string().trim().max(120).optional(),
     lines: z.array(draftLineSchema).min(1, "Ajoute au moins une ligne"),
   })
   .refine((data) => data.periodEnd >= data.periodStart, {
@@ -87,6 +93,7 @@ export async function createDraftInvoiceAction(input: {
   clientId: string;
   periodStart: string;
   periodEnd: string;
+  poNumber?: string;
   lines: Array<{
     description: string;
     quantity: number;
@@ -128,7 +135,41 @@ export async function createDraftInvoiceAction(input: {
   }
   if (!profileRow) return { error: "Paramètres d'entreprise manquants." };
 
-  const allRequestedTimeEntryIds = data.lines.flatMap((line) => line.timeEntryIds);
+  const isSpaceManagementClient = isSpaceManagementClientName(c.name);
+  const invoicePeriod = isSpaceManagementClient
+    ? spaceManagementBillingPeriodForInvoiceMonth(data.periodEnd)
+    : { periodStart: data.periodStart, periodEnd: data.periodEnd };
+
+  let inputLines = data.lines;
+  if (isSpaceManagementClient) {
+    const { data: rows, error } = await supabase
+      .from("time_entry")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("client_id", data.clientId)
+      .is("invoice_id", null)
+      .gte("date", invoicePeriod.periodStart)
+      .lte("date", invoicePeriod.periodEnd)
+      .order("date", { ascending: true });
+    if (error) throw error;
+
+    const entries = (rows ?? []).map(toTimeEntry);
+    const spaceLines = buildSpaceManagementProductManagerLine({
+      entries,
+      periodStart: invoicePeriod.periodStart,
+      periodEnd: invoicePeriod.periodEnd,
+      unitPriceCents: c.defaultRateCents,
+    });
+    if (spaceLines.length === 0) {
+      return {
+        error:
+          "Aucune saisie non facturée pour la période Space Management du 25 au 24.",
+      };
+    }
+    inputLines = spaceLines;
+  }
+
+  const allRequestedTimeEntryIds = inputLines.flatMap((line) => line.timeEntryIds);
   const requestedTimeEntryIds = Array.from(new Set(allRequestedTimeEntryIds));
   if (requestedTimeEntryIds.length !== allRequestedTimeEntryIds.length) {
     return { error: "Une saisie ne peut être facturée qu'une seule fois." };
@@ -148,8 +189,8 @@ export async function createDraftInvoiceAction(input: {
         .filter(
           (entry) =>
             !entry.invoiceId &&
-            entry.date >= data.periodStart &&
-            entry.date <= data.periodEnd,
+            entry.date >= invoicePeriod.periodStart &&
+            entry.date <= invoicePeriod.periodEnd,
         )
         .map((entry) => entry.id),
     );
@@ -160,7 +201,7 @@ export async function createDraftInvoiceAction(input: {
     }
   }
 
-  const lines = data.lines.map((line) => {
+  const lines = inputLines.map((line) => {
     const totalCents = Math.round(line.quantity * line.unitPriceCents);
     return {
       description: line.description.trim(),
@@ -191,6 +232,7 @@ export async function createDraftInvoiceAction(input: {
       currency: "EUR",
       legal_mention: buildLegalMention(profileRow),
       payment_terms_text: buildPaymentTermsText(profileRow),
+      po_number: data.poNumber || null,
       notes: null,
     })
     .select("id")
@@ -318,6 +360,7 @@ export async function updateInvoiceLineDescriptionAction(
 const detailsSchema = z.object({
   issue_date: z.string(),
   due_date: z.string(),
+  po_number: z.string().trim().max(120).optional(),
   notes: z.string().optional(),
 });
 
@@ -340,6 +383,7 @@ export async function updateInvoiceDetailsAction(
     .update({
       issue_date: parsed.data.issue_date,
       due_date: parsed.data.due_date,
+      po_number: parsed.data.po_number || null,
       notes: parsed.data.notes || null,
       updated_at: new Date().toISOString(),
     })

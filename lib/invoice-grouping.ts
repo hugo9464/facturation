@@ -22,16 +22,26 @@ function formatQuantity(qty: number): string {
   return qty.toFixed(2).replace(/0+$/, "").replace(/,$/, "").replace(".", ",");
 }
 
-export function isSpaceManagementClientName(name: string): boolean {
-  return name.trim().toLocaleUpperCase("fr-FR") === "SPACE MANAGEMENT";
+function normalizeClientName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleUpperCase("fr-FR");
 }
 
-export function latestCompletedSpaceManagementBillingPeriod(
-  date: Date = new Date(),
-) {
-  const endMonth =
-    date.getDate() >= 25 ? date.getMonth() : date.getMonth() - 1;
-  const end = new Date(date.getFullYear(), endMonth, 24);
+export function isSpaceManagementClientName(name: string): boolean {
+  return normalizeClientName(name) === "SPACE MANAGEMENT";
+}
+
+export function spaceManagementBillingPeriodForInvoiceMonth(monthDate: string) {
+  const month = monthDate.slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    throw new Error("Invalid invoice month");
+  }
+  const [yearValue, monthValue] = month.split("-").map(Number);
+  const end = new Date(yearValue, monthValue - 1, 24);
   const start = new Date(end.getFullYear(), end.getMonth() - 1, 25);
 
   return {
@@ -48,6 +58,29 @@ export function latestCompletedSpaceManagementBillingPeriod(
   };
 }
 
+export function latestCompletedSpaceManagementBillingPeriod(
+  date: Date = new Date(),
+) {
+  const endMonth =
+    date.getDate() >= 25 ? date.getMonth() : date.getMonth() - 1;
+  const end = new Date(date.getFullYear(), endMonth, 24);
+  return spaceManagementBillingPeriodForInvoiceMonth(
+    [
+      end.getFullYear(),
+      String(end.getMonth() + 1).padStart(2, "0"),
+      "01",
+    ].join("-"),
+  );
+}
+
+export function timeEntryQuantityInDays(entry: Pick<TimeEntry, "quantity" | "type">) {
+  const quantity = Number(entry.quantity);
+  if (!Number.isFinite(quantity)) return 0;
+  if (entry.type === "HALF_DAY") return quantity * 0.5;
+  if (entry.type === "HOUR") return quantity / 8;
+  return quantity;
+}
+
 export function buildSpaceManagementProductManagerLine({
   entries,
   periodStart,
@@ -61,21 +94,18 @@ export function buildSpaceManagementProductManagerLine({
 }): InvoiceLineDraft[] {
   if (entries.length === 0) return [];
 
-  const quantity = entries.reduce((acc, entry) => {
-    const entryQuantity = Number(entry.quantity);
-    if (!Number.isFinite(entryQuantity)) return acc;
-    if (entry.type === "HALF_DAY") return acc + entryQuantity * 0.5;
-    return acc + entryQuantity;
-  }, 0);
+  const quantity = entries.reduce(
+    (acc, entry) => acc + timeEntryQuantityInDays(entry),
+    0,
+  );
 
   return [
     {
-      description: [
-        "Prestation de service de Product Manager",
-        `${formatQuantity(quantity)} jours sur la période du ${formatDate(
-          periodStart,
-        )} au ${formatDate(periodEnd)}`,
-      ].join("\n"),
+      description: `Prestation de Product Manager - ${formatQuantity(
+        quantity,
+      )} jours de prestation sur la période du ${formatDate(
+        periodStart,
+      )} au ${formatDate(periodEnd)}`,
       quantity,
       unitType: "DAY",
       unitPriceCents,

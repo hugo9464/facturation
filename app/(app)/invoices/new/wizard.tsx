@@ -159,6 +159,7 @@ export function NewInvoiceWizard({
   const [periodEnd, setPeriodEnd] = useState(
     initialSpaceManagementPeriod?.periodEnd ?? todayISO(),
   );
+  const [poNumber, setPoNumber] = useState("");
   const [manualLines, setManualLines] = useState<DraftLine[]>([]);
   const [timeLineEdits, setTimeLineEdits] = useState<
     Record<string, Partial<DraftLine>>
@@ -243,6 +244,7 @@ export function NewInvoiceWizard({
   }
 
   function addManualLine() {
+    if (isSpaceManagementSelected) return;
     setManualLines((currentLines) => [...currentLines, createManualLine()]);
   }
 
@@ -254,6 +256,9 @@ export function NewInvoiceWizard({
       const period = latestCompletedSpaceManagementBillingPeriod();
       setPeriodStart(period.periodStart);
       setPeriodEnd(period.periodEnd);
+      setManualLines([]);
+      setHiddenTimeLineIds(new Set<string>());
+      setTimeLineEdits({});
     }
   }
 
@@ -297,6 +302,7 @@ export function NewInvoiceWizard({
         clientId,
         periodStart,
         periodEnd,
+        poNumber,
         lines: payloadLines,
       });
       if (result?.error) toast.error(result.error);
@@ -430,6 +436,15 @@ export function NewInvoiceWizard({
               </p>
             </div>
           </div>
+          <div className="space-y-2 sm:col-span-3">
+            <Label htmlFor="po-number">N° de bon de commande</Label>
+            <Input
+              id="po-number"
+              value={poNumber}
+              onChange={(event) => setPoNumber(event.target.value)}
+              placeholder="Ex: PO-2026-05"
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -442,10 +457,12 @@ export function NewInvoiceWizard({
                 Modifie les lignes préremplies ou ajoute une ligne manuelle.
               </CardDescription>
             </div>
-            <Button variant="outline" size="sm" onClick={addManualLine}>
-              <Plus className="size-4" />
-              Ligne
-            </Button>
+            {!isSpaceManagementSelected && (
+              <Button variant="outline" size="sm" onClick={addManualLine}>
+                <Plus className="size-4" />
+                Ligne
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>

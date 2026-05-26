@@ -4,6 +4,7 @@ import {
   buildSpaceManagementProductManagerLine,
   isSpaceManagementClientName,
   latestCompletedSpaceManagementBillingPeriod,
+  spaceManagementBillingPeriodForInvoiceMonth,
 } from "@/lib/invoice-grouping";
 
 function timeEntry(overrides: Partial<TimeEntry>): TimeEntry {
@@ -26,6 +27,7 @@ function timeEntry(overrides: Partial<TimeEntry>): TimeEntry {
 
 assert.equal(isSpaceManagementClientName("SPACE MANAGEMENT"), true);
 assert.equal(isSpaceManagementClientName(" Space Management "), true);
+assert.equal(isSpaceManagementClientName("space  management"), true);
 assert.equal(isSpaceManagementClientName("Mayday"), false);
 
 assert.deepEqual(
@@ -44,10 +46,16 @@ assert.deepEqual(
   },
 );
 
+assert.deepEqual(spaceManagementBillingPeriodForInvoiceMonth("2026-05-01"), {
+  periodStart: "2026-04-25",
+  periodEnd: "2026-05-24",
+});
+
 const [line] = buildSpaceManagementProductManagerLine({
   entries: [
     timeEntry({ id: "entry-1", quantity: "1" }),
     timeEntry({ id: "entry-2", quantity: "0.5" }),
+    timeEntry({ id: "entry-3", type: "HOUR", quantity: "4" }),
   ],
   periodStart: "2026-04-25",
   periodEnd: "2026-05-24",
@@ -56,10 +64,10 @@ const [line] = buildSpaceManagementProductManagerLine({
 
 assert.deepEqual(line, {
   description:
-    "Prestation de service de Product Manager\n1,5 jours sur la période du 25/04/2026 au 24/05/2026",
-  quantity: 1.5,
+    "Prestation de Product Manager - 2 jours de prestation sur la période du 25/04/2026 au 24/05/2026",
+  quantity: 2,
   unitType: "DAY",
   unitPriceCents: 40000,
-  totalCents: 60000,
-  timeEntryIds: ["entry-1", "entry-2"],
+  totalCents: 80000,
+  timeEntryIds: ["entry-1", "entry-2", "entry-3"],
 });
