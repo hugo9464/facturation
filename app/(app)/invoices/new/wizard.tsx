@@ -21,13 +21,19 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { formatCents } from "@/lib/money";
 import { formatDate, startOfMonthISO, todayISO } from "@/lib/dates";
-import { groupEntriesIntoLines, rateTypeLabel } from "@/lib/invoice-grouping";
+import {
+  buildSpaceManagementProductManagerLine,
+  groupEntriesIntoLines,
+  isSpaceManagementClientName,
+  latestCompletedSpaceManagementBillingPeriod,
+  rateTypeLabel,
+} from "@/lib/invoice-grouping";
 import { createDraftInvoiceAction } from "@/actions/invoices";
 import {
   getClientMissingFields,
   type MissingField,
 } from "@/lib/billing-readiness";
-import type { Client, RateType, TimeEntry, TodoProject } from "@/db/schema";
+import type { Client, RateType, TimeEntry } from "@/db/schema";
 import { AlertCircle, Plus, Trash2 } from "lucide-react";
 
 type DraftLine = {
@@ -38,10 +44,6 @@ type DraftLine = {
   unitType: RateType;
   unitPrice: string;
   timeEntryIds: string[];
-};
-
-type ProjectOption = TodoProject & {
-  client: Client;
 };
 
 const TYPE_LABELS: Record<RateType, string> = {
@@ -70,23 +72,43 @@ function formatUnitPriceInput(cents: number): string {
 
 function getEntriesForPeriod(
   entries: TimeEntry[],
-  projectId: string,
+  clientId: string,
   periodStart: string,
   periodEnd: string,
 ) {
-  if (!projectId || !periodStart || !periodEnd || periodEnd < periodStart) {
+  if (!clientId || !periodStart || !periodEnd || periodEnd < periodStart) {
     return [];
   }
   return entries.filter(
     (entry) =>
-      entry.projectId === projectId &&
+      entry.clientId === clientId &&
       entry.date >= periodStart &&
       entry.date <= periodEnd,
   );
 }
 
-function buildTimeLines(entries: TimeEntry[]): DraftLine[] {
-  return groupEntriesIntoLines(entries).map((line) => ({
+function buildTimeLines({
+  entries,
+  client,
+  periodStart,
+  periodEnd,
+}: {
+  entries: TimeEntry[];
+  client: Client | undefined;
+  periodStart: string;
+  periodEnd: string;
+}): DraftLine[] {
+  const invoiceLines =
+    client && isSpaceManagementClientName(client.name)
+      ? buildSpaceManagementProductManagerLine({
+          entries,
+          periodStart,
+          periodEnd,
+          unitPriceCents: client.defaultRateCents,
+        })
+      : groupEntriesIntoLines(entries);
+
+  return invoiceLines.map((line) => ({
     id: `time:${[...line.timeEntryIds].sort().join(":")}`,
     source: "time",
     description: line.description,
@@ -114,20 +136,29 @@ function lineTotalCents(line: DraftLine): number {
 }
 
 export function NewInvoiceWizard({
-  projects,
+  clients,
   unbilledEntries,
-  preselectedProjectId,
+  preselectedClientId,
   profileMissing,
 }: {
-  projects: ProjectOption[];
+  clients: Client[];
   unbilledEntries: TimeEntry[];
-  preselectedProjectId?: string;
+  preselectedClientId?: string;
   profileMissing: MissingField[];
 }) {
-  const initialProjectId = preselectedProjectId ?? projects[0]?.id ?? "";
-  const [projectId, setProjectId] = useState(initialProjectId);
-  const [periodStart, setPeriodStart] = useState(startOfMonthISO());
-  const [periodEnd, setPeriodEnd] = useState(todayISO());
+  const initialClientId = preselectedClientId ?? clients[0]?.id ?? "";
+  const initialClient = clients.find((client) => client.id === initialClientId);
+  const initialSpaceManagementPeriod =
+    initialClient && isSpaceManagementClientName(initialClient.name)
+      ? latestCompletedSpaceManagementBillingPeriod()
+      : null;
+  const [clientId, setClientId] = useState(initialClientId);
+  const [periodStart, setPeriodStart] = useState(
+    initialSpaceManagementPeriod?.periodStart ?? startOfMonthISO(),
+  );
+  const [periodEnd, setPeriodEnd] = useState(
+    initialSpaceManagementPeriod?.periodEnd ?? todayISO(),
+  );
   const [manualLines, setManualLines] = useState<DraftLine[]>([]);
   const [timeLineEdits, setTimeLineEdits] = useState<
     Record<string, Partial<DraftLine>>
@@ -136,18 +167,34 @@ export function NewInvoiceWizard({
     () => new Set(),
   );
   const [pending, start] = useTransition();
+  const selectedClient = clients.find((client) => client.id === clientId);
+  const isSpaceManagementSelected = selectedClient
+    ? isSpaceManagementClientName(selectedClient.name)
+    : false;
 
   const periodEntries = useMemo(
-    () => getEntriesForPeriod(unbilledEntries, projectId, periodStart, periodEnd),
-    [unbilledEntries, projectId, periodStart, periodEnd],
+    () => getEntriesForPeriod(unbilledEntries, clientId, periodStart, periodEnd),
+    [unbilledEntries, clientId, periodStart, periodEnd],
   );
 
   const timeLines = useMemo(
     () =>
-      buildTimeLines(periodEntries)
+      buildTimeLines({
+        entries: periodEntries,
+        client: selectedClient,
+        periodStart,
+        periodEnd,
+      })
         .filter((line) => !hiddenTimeLineIds.has(line.id))
         .map((line) => ({ ...line, ...timeLineEdits[line.id] })),
-    [periodEntries, hiddenTimeLineIds, timeLineEdits],
+    [
+      periodEntries,
+      selectedClient,
+      periodStart,
+      periodEnd,
+      hiddenTimeLineIds,
+      timeLineEdits,
+    ],
   );
 
   const lines = useMemo(
@@ -155,8 +202,6 @@ export function NewInvoiceWizard({
     [timeLines, manualLines],
   );
 
-  const selectedProject = projects.find((project) => project.id === projectId);
-  const selectedClient = selectedProject?.client;
   const clientMissing = useMemo(
     () => (selectedClient ? getClientMissingFields(selectedClient) : []),
     [selectedClient],
@@ -164,6 +209,9 @@ export function NewInvoiceWizard({
 
   const billable = profileMissing.length === 0 && clientMissing.length === 0;
   const periodInvalid = Boolean(periodStart && periodEnd && periodEnd < periodStart);
+  const spaceManagementPeriodInvalid =
+    isSpaceManagementSelected &&
+    (!periodStart.endsWith("-25") || !periodEnd.endsWith("-24"));
 
   const totalCents = useMemo(() => {
     return lines.reduce((acc, line) => acc + lineTotalCents(line), 0);
@@ -198,10 +246,25 @@ export function NewInvoiceWizard({
     setManualLines((currentLines) => [...currentLines, createManualLine()]);
   }
 
+  function selectClient(id: string | null) {
+    if (!id) return;
+    setClientId(id);
+    const nextClient = clients.find((client) => client.id === id);
+    if (nextClient && isSpaceManagementClientName(nextClient.name)) {
+      const period = latestCompletedSpaceManagementBillingPeriod();
+      setPeriodStart(period.periodStart);
+      setPeriodEnd(period.periodEnd);
+    }
+  }
+
   async function onSubmit() {
-    if (!projectId) return;
+    if (!clientId) return;
     if (periodInvalid) {
       toast.error("La période est invalide");
+      return;
+    }
+    if (spaceManagementPeriodInvalid) {
+      toast.error("Les factures SPACE MANAGEMENT doivent courir du 25 au 24");
       return;
     }
     if (lines.length === 0) {
@@ -231,7 +294,7 @@ export function NewInvoiceWizard({
 
     start(async () => {
       const result = await createDraftInvoiceAction({
-        projectId,
+        clientId,
         periodStart,
         periodEnd,
         lines: payloadLines,
@@ -240,18 +303,17 @@ export function NewInvoiceWizard({
     });
   }
 
-  if (projects.length === 0) {
+  if (clients.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Aucun projet</CardTitle>
+          <CardTitle>Aucun client</CardTitle>
           <CardDescription>
-            Crée d&apos;abord un projet rattaché à un client pour pouvoir
-            facturer.
+            Crée d&apos;abord un client actif pour pouvoir facturer.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ButtonLink href="/projects">Créer un projet</ButtonLink>
+          <ButtonLink href="/clients/new">Créer un client</ButtonLink>
         </CardContent>
       </Card>
     );
@@ -312,29 +374,27 @@ export function NewInvoiceWizard({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Projet et période</CardTitle>
+          <CardTitle className="text-base">Client et période</CardTitle>
           <CardDescription>
             Les temps non facturés de la période préremplissent les lignes.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-2 sm:col-span-3">
-            <Label htmlFor="project">Projet à facturer</Label>
+            <Label htmlFor="client">Client à facturer</Label>
             <Select
-              value={projectId}
-              onValueChange={(id) => id && setProjectId(id)}
+              value={clientId}
+              onValueChange={selectClient}
             >
-              <SelectTrigger id="project" className="w-full">
+              <SelectTrigger id="client" className="w-full">
                 <span className="truncate">
-                  {selectedProject
-                    ? `${selectedProject.name} · ${selectedProject.client.name}`
-                    : "Projet"}
+                  {selectedClient ? selectedClient.name : "Client"}
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {projects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
-                    {project.name} · {project.client.name}
+                {clients.map((client) => (
+                  <SelectItem key={client.id} value={client.id}>
+                    {client.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -517,7 +577,12 @@ export function NewInvoiceWizard({
         <Button
           onClick={onSubmit}
           disabled={
-            pending || lines.length === 0 || !billable || periodInvalid || !projectId
+            pending ||
+            lines.length === 0 ||
+            !billable ||
+            periodInvalid ||
+            spaceManagementPeriodInvalid ||
+            !clientId
           }
           size="lg"
         >

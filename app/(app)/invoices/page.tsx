@@ -36,7 +36,7 @@ export default async function InvoicesPage() {
   const supabase = await getSupabaseDb();
   const { data, error } = await supabase
     .from("invoice")
-    .select("*, client:client_id(name), project:project_id(name)")
+    .select("*, client:client_id(name)")
     .eq("user_id", user.id)
     .order("issue_date", { ascending: false })
     .order("created_at", { ascending: false });
@@ -44,7 +44,6 @@ export default async function InvoicesPage() {
   const rows = (data ?? []).map((row) => ({
     invoice: toInvoice(row),
     clientName: Array.isArray(row.client) ? row.client[0]?.name : row.client?.name,
-    projectName: Array.isArray(row.project) ? row.project[0]?.name : row.project?.name,
   }));
 
   return (
@@ -79,7 +78,6 @@ export default async function InvoicesPage() {
                 <TableHead>N°</TableHead>
                 <TableHead>Émise le</TableHead>
                 <TableHead>Client</TableHead>
-                <TableHead>Projet</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Montant</TableHead>
@@ -109,11 +107,6 @@ export default async function InvoicesPage() {
                     <TableCell>
                       <Link href={href} className="-m-2 block p-2">
                         {r.clientName}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <Link href={href} className="-m-2 block p-2">
-                        {r.projectName ?? "—"}
                       </Link>
                     </TableCell>
                     <TableCell>

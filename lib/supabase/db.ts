@@ -1,11 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isLocalhostServerRequest } from "@/lib/local-dev-server";
 import type {
   Client,
   Invoice,
   InvoiceLine,
   Profile,
+  ProspectionApplicationQuestion,
   ProspectionEntry,
   ProspectionCvGeneration,
+  ProspectionCvProfile,
   ProspectionResume,
   Quote,
   QuoteLine,
@@ -233,6 +237,23 @@ export function toProspectionEntry(row: Raw): ProspectionEntry {
   };
 }
 
+export function toProspectionApplicationQuestion(
+  row: Raw,
+): ProspectionApplicationQuestion {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    entryId: row.entry_id as string,
+    question: row.question as string,
+    answer: (row.answer as string | null) ?? "",
+    model: (row.model as string | null) ?? null,
+    generatedAt: date(row.generated_at),
+    order: Number(row.order),
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
 function arrayValue<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -243,6 +264,9 @@ export function toProspectionResume(row: Raw): ProspectionResume {
     userId: row.user_id as string,
     title: row.title as string,
     content: row.content as string,
+    sourceFileName: (row.source_file_name as string | null) ?? null,
+    structuredContent:
+      row.structured_content as ProspectionResume["structuredContent"],
     photoDataUrl: (row.photo_data_url as string | null) ?? null,
     notes: (row.notes as string | null) ?? null,
     createdAt: requiredDate(row.created_at),
@@ -267,7 +291,20 @@ export function toProspectionCvGeneration(row: Raw): ProspectionCvGeneration {
   };
 }
 
+export function toProspectionCvProfile(row: Raw): ProspectionCvProfile {
+  return {
+    userId: row.user_id as string,
+    photoDataUrl: (row.photo_data_url as string | null) ?? null,
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
 export async function getSupabaseDb() {
+  if (await isLocalhostServerRequest()) {
+    return createAdminClient();
+  }
+
   return createClient();
 }
 

@@ -12,6 +12,16 @@ type OpenAIResponseOutput = {
   content?: Array<{ type?: string; text?: string }>;
 };
 
+type OpenAIInputContent =
+  | { type: "input_text"; text: string }
+  | {
+      type: "input_file";
+      filename?: string;
+      file_data?: string;
+      file_id?: string;
+      file_url?: string;
+    };
+
 type OpenAIResponseBody = {
   output_text?: string;
   output?: OpenAIResponseOutput[];
@@ -41,17 +51,20 @@ export async function createStructuredOpenAIResponse<T>({
   model = DEFAULT_OPENAI_CV_MODEL,
   system,
   user,
+  content,
   format,
 }: {
   model?: string;
   system: string;
-  user: string;
+  user?: string;
+  content?: OpenAIInputContent[];
   format: JsonSchemaFormat;
 }): Promise<{ data: T; model: string }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY manquant dans la configuration");
   }
+  const userContent = content ?? [{ type: "input_text" as const, text: user ?? "" }];
 
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
@@ -68,7 +81,7 @@ export async function createStructuredOpenAIResponse<T>({
         },
         {
           role: "user",
-          content: [{ type: "input_text", text: user }],
+          content: userContent,
         },
       ],
       text: { format },

@@ -16,7 +16,7 @@ function filenameFrom(title: string) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -36,11 +36,15 @@ export async function GET(
     cv: generation.generatedCv,
     photoDataUrl: generation.photoDataUrl,
   });
+  const disposition =
+    new URL(request.url).searchParams.get("download") === "1"
+      ? "attachment"
+      : "inline";
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${filenameFrom(generation.title) || "cv-adapte"}.pdf"`,
+      "Content-Disposition": `${disposition}; filename="${filenameFrom(generation.title) || "cv-adapte"}.pdf"`,
       "Cache-Control": "no-store",
     },
   });

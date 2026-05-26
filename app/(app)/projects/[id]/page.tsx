@@ -148,7 +148,7 @@ export default async function ProjectDetailPage({
                   Logger temps
                 </Button>
               </TimeEntryDialog>
-              <ButtonLink href={`/invoices/new?project=${projectRow.project.id}`}>
+              <ButtonLink href={`/invoices/new?client=${projectRow.client.id}`}>
                 <FileText className="size-4" />
                 Facturer
               </ButtonLink>
@@ -199,7 +199,7 @@ export default async function ProjectDetailPage({
         <TabsContent value="billing" className="pt-4">
           <Suspense fallback={<PanelLoading label="Chargement de la facturation" />}>
             <ProjectBilling
-              hasClient={Boolean(projectRow.client)}
+              clientId={projectRow.client?.id ?? null}
               projectId={id}
               userId={user.id}
             />
@@ -350,24 +350,26 @@ async function ProjectTime({
 }
 
 async function ProjectBilling({
-  hasClient,
+  clientId,
   projectId,
   userId,
 }: {
-  hasClient: boolean;
+  clientId: string | null;
   projectId: string;
   userId: string;
 }) {
   const supabase = await getSupabaseDb();
   const [invoices, quotes] = await Promise.all([
-    supabase
-      .from("invoice")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("project_id", projectId)
-      .order("issue_date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(20),
+    clientId
+      ? supabase
+          .from("invoice")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("client_id", clientId)
+          .order("issue_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [], error: null }),
     supabase
       .from("quote")
       .select("*")
@@ -387,7 +389,7 @@ async function ProjectBilling({
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-medium">Devis</h2>
-          {hasClient && (
+          {clientId && (
             <ButtonLink
               href={`/quotes/new?project=${projectId}`}
               size="sm"
@@ -413,16 +415,16 @@ async function ProjectBilling({
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-medium">Factures</h2>
-          {hasClient && (
-            <ButtonLink href={`/invoices/new?project=${projectId}`} size="sm">
+          <h2 className="text-base font-medium">Factures du client</h2>
+          {clientId && (
+            <ButtonLink href={`/invoices/new?client=${clientId}`} size="sm">
               <Plus className="size-4" />
               Nouvelle facture
             </ButtonLink>
           )}
         </div>
         <DocumentList
-          emptyLabel="Aucune facture pour ce projet."
+          emptyLabel="Aucune facture pour ce client."
           rows={invoiceRows.map((item) => ({
             id: item.id,
             href: `/invoices/${item.id}`,

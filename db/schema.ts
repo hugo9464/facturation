@@ -275,6 +275,8 @@ export type ProspectionResume = {
   userId: string;
   title: string;
   content: string;
+  sourceFileName: string | null;
+  structuredContent: import("@/lib/prospection-cv").ResumeMemory;
   photoDataUrl: string | null;
   notes: string | null;
   createdAt: Date;
@@ -285,6 +287,13 @@ export type NewProspectionResume = Omit<
   ProspectionResume,
   "id" | "createdAt" | "updatedAt"
 >;
+
+export type ProspectionCvProfile = {
+  userId: string;
+  photoDataUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 export type ProspectionCvGeneration = {
   id: string;
@@ -303,5 +312,23 @@ export type ProspectionCvGeneration = {
 
 export type NewProspectionCvGeneration = Omit<
   ProspectionCvGeneration,
+  "id" | "createdAt" | "updatedAt"
+>;
+
+export type ProspectionApplicationQuestion = {
+  id: string;
+  userId: string;
+  entryId: string;
+  question: string;
+  answer: string;
+  model: string | null;
+  generatedAt: Date | null;
+  order: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewProspectionApplicationQuestion = Omit<
+  ProspectionApplicationQuestion,
   "id" | "createdAt" | "updatedAt"
 >;

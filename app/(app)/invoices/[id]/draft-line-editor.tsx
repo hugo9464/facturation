@@ -7,6 +7,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -134,7 +135,7 @@ export function EditInvoiceLineDescription({
   if (!editing) {
     return (
       <div className="group/line flex items-start gap-2">
-        <span className="min-w-0 flex-1">{description}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-line">{description}</span>
         <Button
           type="button"
           variant="ghost"
@@ -168,12 +169,13 @@ export function EditInvoiceLineDescription({
         });
       }}
     >
-      <Input
+      <Textarea
         name="description"
         defaultValue={description}
         disabled={pending}
         autoFocus
         required
+        rows={3}
       />
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={pending}>

@@ -28,14 +28,14 @@ export function ProspectionRowActions({
   const [pending, start] = useTransition();
 
   function onDelete() {
-    if (!window.confirm("Supprimer cette prospection ?")) return;
+    if (!window.confirm("Supprimer cette offre ?")) return;
     start(async () => {
       const result = await deleteProspectionEntryAction(entry.id);
       if ("error" in result && result.error) {
         toast.error(result.error);
         return;
       }
-      toast.success("Prospection supprimée");
+      toast.success("Offre supprimée");
       router.refresh();
     });
   }
@@ -51,7 +51,7 @@ export function ProspectionRowActions({
         </DialogTrigger>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Modifier la prospection</DialogTitle>
+            <DialogTitle>Modifier l&apos;offre</DialogTitle>
           </DialogHeader>
           <ProspectionForm entry={entry} onSaved={() => setOpen(false)} />
         </DialogContent>

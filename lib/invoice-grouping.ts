@@ -1,5 +1,5 @@
 import type { TimeEntry, RateType } from "@/db/schema";
-import { formatMonthYear } from "@/lib/dates";
+import { formatDate, formatMonthYear } from "@/lib/dates";
 
 export type InvoiceLineDraft = {
   description: string;
@@ -19,7 +19,70 @@ const RATE_LABELS: Record<RateType, { singular: string; plural: string }> = {
 
 function formatQuantity(qty: number): string {
   if (Number.isInteger(qty)) return qty.toString();
-  return qty.toFixed(2).replace(".", ",");
+  return qty.toFixed(2).replace(/0+$/, "").replace(/,$/, "").replace(".", ",");
+}
+
+export function isSpaceManagementClientName(name: string): boolean {
+  return name.trim().toLocaleUpperCase("fr-FR") === "SPACE MANAGEMENT";
+}
+
+export function latestCompletedSpaceManagementBillingPeriod(
+  date: Date = new Date(),
+) {
+  const endMonth =
+    date.getDate() >= 25 ? date.getMonth() : date.getMonth() - 1;
+  const end = new Date(date.getFullYear(), endMonth, 24);
+  const start = new Date(end.getFullYear(), end.getMonth() - 1, 25);
+
+  return {
+    periodStart: [
+      start.getFullYear(),
+      String(start.getMonth() + 1).padStart(2, "0"),
+      "25",
+    ].join("-"),
+    periodEnd: [
+      end.getFullYear(),
+      String(end.getMonth() + 1).padStart(2, "0"),
+      "24",
+    ].join("-"),
+  };
+}
+
+export function buildSpaceManagementProductManagerLine({
+  entries,
+  periodStart,
+  periodEnd,
+  unitPriceCents,
+}: {
+  entries: TimeEntry[];
+  periodStart: string;
+  periodEnd: string;
+  unitPriceCents: number;
+}): InvoiceLineDraft[] {
+  if (entries.length === 0) return [];
+
+  const quantity = entries.reduce((acc, entry) => {
+    const entryQuantity = Number(entry.quantity);
+    if (!Number.isFinite(entryQuantity)) return acc;
+    if (entry.type === "HALF_DAY") return acc + entryQuantity * 0.5;
+    return acc + entryQuantity;
+  }, 0);
+
+  return [
+    {
+      description: [
+        "Prestation de service de Product Manager",
+        `${formatQuantity(quantity)} jours sur la période du ${formatDate(
+          periodStart,
+        )} au ${formatDate(periodEnd)}`,
+      ].join("\n"),
+      quantity,
+      unitType: "DAY",
+      unitPriceCents,
+      totalCents: Math.round(quantity * unitPriceCents),
+      timeEntryIds: entries.map((entry) => entry.id),
+    },
+  ];
 }
 
 /**

@@ -136,7 +136,7 @@ export default async function InvoiceDetailPage({
               <TableBody>
                 {lines.map((l) => (
                   <TableRow key={l.id}>
-                    <TableCell className="max-w-xs">
+                    <TableCell className="max-w-xs whitespace-pre-line">
                       {isDraft ? (
                         <EditInvoiceLineDescription
                           invoiceId={id}

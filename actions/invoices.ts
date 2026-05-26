@@ -35,7 +35,7 @@ const draftLineSchema = z.object({
 
 const draftSchema = z
   .object({
-    projectId: z.string().uuid(),
+    clientId: z.string().uuid(),
     periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     lines: z.array(draftLineSchema).min(1, "Ajoute au moins une ligne"),
@@ -84,7 +84,7 @@ async function recomputeInvoiceTotal(invoiceId: string) {
 }
 
 export async function createDraftInvoiceAction(input: {
-  projectId: string;
+  clientId: string;
   periodStart: string;
   periodEnd: string;
   lines: Array<{
@@ -104,19 +104,16 @@ export async function createDraftInvoiceAction(input: {
   const supabase = await getSupabaseDb();
 
   const profileRow = await getProfile(user.id);
-  const { data: projectRow, error: projectError } = await supabase
-    .from("todo_project")
-    .select("client:client_id(*)")
-    .eq("id", data.projectId)
+  const { data: clientRow, error: clientError } = await supabase
+    .from("client")
+    .select("*")
+    .eq("id", data.clientId)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (projectError) throw projectError;
-
-  const clientRow = Array.isArray(projectRow?.client)
-    ? projectRow.client[0]
-    : projectRow?.client;
+  if (clientError) throw clientError;
   const c = clientRow ? toClient(clientRow) : null;
   if (!c) return { error: "Client introuvable" };
+  if (c.archived) return { error: "Ce client est archivé." };
 
   const profileMissing = getProfileMissingFields(profileRow);
   const clientMissing = getClientMissingFields(c);
@@ -143,7 +140,7 @@ export async function createDraftInvoiceAction(input: {
       .select("*")
       .in("id", requestedTimeEntryIds)
       .eq("user_id", user.id)
-      .eq("project_id", data.projectId);
+      .eq("client_id", data.clientId);
     if (error) throw error;
     const entries = (rows ?? []).map(toTimeEntry);
     const validEntryIds = new Set(
@@ -184,7 +181,7 @@ export async function createDraftInvoiceAction(input: {
     .insert({
       user_id: user.id,
       client_id: c.id,
-      project_id: data.projectId,
+      project_id: null,
       number: null,
       issue_date: issueDate,
       due_date: dueDate,

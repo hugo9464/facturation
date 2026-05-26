@@ -3,17 +3,24 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Download, HelpCircle, Sparkles } from "lucide-react";
+import { Download, FileCheck2, HelpCircle, Sparkles } from "lucide-react";
 import {
   askCvRefinementQuestionsAction,
-  generateTailoredCvAction,
+  draftTailoredCvAction,
+  saveTailoredCvAction,
 } from "@/actions/prospection-cv";
 import type {
   CvAnswer,
   CvQuestion,
   ProspectionCvGenerationView,
   ProspectionResumeView,
+  TailoredCv,
 } from "@/lib/prospection-cv";
+import {
+  CvRefinementQuestions,
+  areCvQuestionsAnswered,
+} from "./cv-refinement-questions";
+import { TailoredCvEditor } from "./tailored-cv-editor";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -35,12 +42,17 @@ export function ProspectionCvGenerator({
   );
   const [questions, setQuestions] = useState<CvQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [draftCv, setDraftCv] = useState<TailoredCv | null>(null);
+  const [draftModel, setDraftModel] = useState("");
   const [questionsPending, startQuestions] = useTransition();
-  const [generationPending, startGeneration] = useTransition();
+  const [draftPending, startDraft] = useTransition();
+  const [savePending, startSave] = useTransition();
 
   const canAskQuestions =
     offerDescription.trim().length >= 80 && selectedResumeIds.length > 0;
-  const canGenerate = canAskQuestions && questions.length > 0;
+  const canDraft =
+    canAskQuestions && questions.length > 0 && areCvQuestionsAnswered(questions, answers);
+  const canSave = canDraft && draftCv !== null;
 
   const latestGeneration = generations[0];
   const selectedResumes = useMemo(
@@ -69,6 +81,8 @@ export function ProspectionCvGenerator({
       if (!("questions" in result)) return;
       setQuestions(result.questions);
       setAnswers({});
+      setDraftCv(null);
+      setDraftModel("");
       toast.success("Questions prêtes");
     });
   }
@@ -77,25 +91,57 @@ export function ProspectionCvGenerator({
     setAnswers((current) => ({ ...current, [question]: answer }));
   }
 
-  function onGenerate() {
-    startGeneration(async () => {
-      const payloadAnswers: CvAnswer[] = questions.map((question) => ({
-        question: question.question,
-        answer: answers[question.question] ?? "",
-      }));
-      const result = await generateTailoredCvAction({
+  function payloadAnswers(): CvAnswer[] {
+    return questions.map((question) => ({
+      question: question.question,
+      answer: answers[question.question] ?? "",
+    }));
+  }
+
+  function onPrepareDraft() {
+    startDraft(async () => {
+      const result = await draftTailoredCvAction({
         title,
         offerDescription,
         resumeIds: selectedResumeIds,
         questions,
-        answers: payloadAnswers,
+        answers: payloadAnswers(),
       });
       if ("error" in result && result.error) {
         toast.error(result.error);
         return;
       }
-      toast.success("CV généré");
+      if (!("cv" in result)) return;
+      setDraftCv(result.cv);
+      setDraftModel(result.model);
+      toast.success("Contenu du CV prêt à valider");
+    });
+  }
+
+  function onSavePdf() {
+    if (!draftCv) return;
+    startSave(async () => {
+      const payloadAnswers: CvAnswer[] = questions.map((question) => ({
+        question: question.question,
+        answer: answers[question.question] ?? "",
+      }));
+      const result = await saveTailoredCvAction({
+        title,
+        offerDescription,
+        resumeIds: selectedResumeIds,
+        questions,
+        answers: payloadAnswers,
+        generatedCv: draftCv,
+        model: draftModel,
+      });
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("CV PDF généré");
       setTitle("");
+      setDraftCv(null);
+      setDraftModel("");
       router.refresh();
     });
   }
@@ -147,7 +193,7 @@ export function ProspectionCvGenerator({
                       {resume.title}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {resume.photoDataUrl ? "Photo incluse" : "Sans photo"}
+                      {resume.sourceFileName ?? "PDF analysé"}
                     </span>
                   </span>
                 </label>
@@ -161,45 +207,58 @@ export function ProspectionCvGenerator({
             type="button"
             variant="outline"
             onClick={onAskQuestions}
-            disabled={!canAskQuestions || questionsPending || generationPending}
+            disabled={!canAskQuestions || questionsPending || draftPending || savePending}
           >
             <HelpCircle className="size-4" />
             {questionsPending ? "Analyse..." : "Poser les questions"}
           </Button>
           <Button
             type="button"
-            onClick={onGenerate}
-            disabled={!canGenerate || generationPending || questionsPending}
+            variant={draftCv ? "outline" : "default"}
+            onClick={onPrepareDraft}
+            disabled={!canDraft || draftPending || questionsPending || savePending}
           >
             <Sparkles className="size-4" />
-            {generationPending ? "Génération..." : "Générer le CV PDF"}
+            {draftPending ? "Préparation..." : draftCv ? "Regénérer le contenu" : "Préparer le contenu"}
+          </Button>
+          <Button
+            type="button"
+            onClick={onSavePdf}
+            disabled={!canSave || savePending || draftPending || questionsPending}
+          >
+            <FileCheck2 className="size-4" />
+            {savePending ? "Génération..." : "Valider et générer le PDF"}
           </Button>
         </div>
 
         {questions.length > 0 ? (
-          <div className="space-y-3 border-t pt-4">
+          <CvRefinementQuestions
+            idPrefix="cv-question"
+            questions={questions}
+            answers={answers}
+            onAnswer={setAnswer}
+          />
+        ) : null}
+
+        {draftCv ? (
+          <div className="space-y-4 border-t pt-4">
             <div>
-              <h3 className="text-sm font-medium">Questions d&apos;affinage</h3>
+              <h3 className="text-sm font-medium">Contenu du CV à valider</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Réponds seulement aux points utiles, l&apos;IA prendra le reste depuis
-                les CV sélectionnés.
+                Modifie le contenu ci-dessous avant de créer le PDF final.
               </p>
             </div>
-            {questions.map((question) => (
-              <div key={question.id} className="space-y-2">
-                <Label htmlFor={`question-${question.id}`}>
-                  {question.question}
-                </Label>
-                <Textarea
-                  id={`question-${question.id}`}
-                  value={answers[question.question] ?? ""}
-                  onChange={(event) =>
-                    setAnswer(question.question, event.target.value)
-                  }
-                  rows={2}
-                />
-              </div>
-            ))}
+            <TailoredCvEditor value={draftCv} onChange={setDraftCv} />
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={onSavePdf}
+                disabled={savePending || draftPending || questionsPending}
+              >
+                <FileCheck2 className="size-4" />
+                {savePending ? "Génération..." : "Valider et générer le PDF"}
+              </Button>
+            </div>
           </div>
         ) : null}
       </div>

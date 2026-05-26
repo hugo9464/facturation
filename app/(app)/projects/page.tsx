@@ -18,7 +18,7 @@ export default async function ProjectsPage() {
   const user = await requireUser();
   const supabase = await getSupabaseDb();
 
-  const [clientsResult, projectsResult, tasksResult, entriesResult, invoicesResult, quotesResult] =
+  const [clientsResult, projectsResult, tasksResult, entriesResult, quotesResult] =
     await Promise.all([
       supabase.from("client").select("*").eq("user_id", user.id).order("name"),
       supabase
@@ -29,7 +29,6 @@ export default async function ProjectsPage() {
         .order("created_at", { ascending: true }),
       supabase.from("todo_task").select("project_id").eq("user_id", user.id),
       supabase.from("time_entry").select("project_id").eq("user_id", user.id),
-      supabase.from("invoice").select("project_id").eq("user_id", user.id),
       supabase.from("quote").select("project_id").eq("user_id", user.id),
     ]);
   for (const result of [
@@ -37,7 +36,6 @@ export default async function ProjectsPage() {
     projectsResult,
     tasksResult,
     entriesResult,
-    invoicesResult,
     quotesResult,
   ]) {
     if (result.error) throw result.error;
@@ -53,14 +51,12 @@ export default async function ProjectsPage() {
   };
   const taskCounts = countByProject(tasksResult.data ?? []);
   const entryCounts = countByProject(entriesResult.data ?? []);
-  const invoiceCounts = countByProject(invoicesResult.data ?? []);
   const quoteCounts = countByProject(quotesResult.data ?? []);
   const rows = (projectsResult.data ?? []).map((row) => ({
     project: toTodoProject(row),
     clientName: Array.isArray(row.client) ? row.client[0]?.name : row.client?.name,
     taskCount: taskCounts.get(row.id) ?? 0,
     entryCount: entryCounts.get(row.id) ?? 0,
-    invoiceCount: invoiceCounts.get(row.id) ?? 0,
     quoteCount: quoteCounts.get(row.id) ?? 0,
   }));
 
@@ -86,7 +82,7 @@ export default async function ProjectsPage() {
           <FolderKanban className="mx-auto size-8 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">
             Aucun projet. Crée un client puis un projet pour organiser le temps,
-            les tâches et la facturation.
+            les tâches et les devis.
           </p>
         </div>
       ) : (
@@ -99,7 +95,6 @@ export default async function ProjectsPage() {
                 <TableHead>Tâches</TableHead>
                 <TableHead>Temps</TableHead>
                 <TableHead>Devis</TableHead>
-                <TableHead>Factures</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -122,7 +117,6 @@ export default async function ProjectsPage() {
                   <TableCell>{row.taskCount}</TableCell>
                   <TableCell>{row.entryCount}</TableCell>
                   <TableCell>{row.quoteCount}</TableCell>
-                  <TableCell>{row.invoiceCount}</TableCell>
                   <TableCell className="text-right">
                     <ButtonLink
                       href={`/projects/${row.project.id}`}
