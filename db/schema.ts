@@ -45,6 +45,10 @@ export const prospectionStatusEnum = {
   ] as const,
 };
 
+export const prospectionOfferReviewStatusEnum = {
+  enumValues: ["PENDING", "IMPORTED", "ARCHIVED"] as const,
+};
+
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
@@ -55,6 +59,8 @@ export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
 export type ProspectionType = (typeof prospectionTypeEnum.enumValues)[number];
 export type ProspectionStatus =
   (typeof prospectionStatusEnum.enumValues)[number];
+export type ProspectionOfferReviewStatus =
+  (typeof prospectionOfferReviewStatusEnum.enumValues)[number];
 
 export type Profile = {
   userId: string;
@@ -268,6 +274,35 @@ export type ProspectionEntry = {
 export type NewProspectionEntry = Omit<
   ProspectionEntry,
   "id" | "createdAt" | "updatedAt"
+>;
+
+export type ProspectionOfferReview = {
+  id: string;
+  userId: string;
+  status: ProspectionOfferReviewStatus;
+  sourceUrl: string;
+  sourceId: string | null;
+  title: string;
+  organization: string | null;
+  location: string | null;
+  dailyRate: string | null;
+  notes: string | null;
+  aiMatches: boolean | null;
+  accepted: boolean;
+  score: number | null;
+  heuristicScore: number;
+  matchedTerms: string[];
+  fitSignals: string[];
+  reason: string | null;
+  entryId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  reviewedAt: Date | null;
+};
+
+export type NewProspectionOfferReview = Omit<
+  ProspectionOfferReview,
+  "id" | "createdAt" | "updatedAt" | "reviewedAt"
 >;
 
 export type ProspectionResume = {

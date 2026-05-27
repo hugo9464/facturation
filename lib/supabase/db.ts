@@ -10,6 +10,7 @@ import type {
   ProspectionEntry,
   ProspectionCvGeneration,
   ProspectionCvProfile,
+  ProspectionOfferReview,
   ProspectionResume,
   Quote,
   QuoteLine,
@@ -256,6 +257,33 @@ export function toProspectionApplicationQuestion(
 
 function arrayValue<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+export function toProspectionOfferReview(row: Raw): ProspectionOfferReview {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    status: row.status as ProspectionOfferReview["status"],
+    sourceUrl: row.source_url as string,
+    sourceId: (row.source_id as string | null) ?? null,
+    title: row.title as string,
+    organization: (row.organization as string | null) ?? null,
+    location: (row.location as string | null) ?? null,
+    dailyRate: (row.daily_rate as string | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
+    aiMatches: (row.ai_matches as boolean | null) ?? null,
+    accepted: Boolean(row.accepted),
+    score:
+      row.score === null || row.score === undefined ? null : Number(row.score),
+    heuristicScore: Number(row.heuristic_score),
+    matchedTerms: arrayValue<string>(row.matched_terms),
+    fitSignals: arrayValue<string>(row.fit_signals),
+    reason: (row.reason as string | null) ?? null,
+    entryId: (row.entry_id as string | null) ?? null,
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+    reviewedAt: date(row.reviewed_at),
+  };
 }
 
 export function toProspectionResume(row: Raw): ProspectionResume {

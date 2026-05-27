@@ -1,6 +1,8 @@
 import type {
   ProspectionApplicationQuestion,
   ProspectionEntry,
+  ProspectionOfferReview,
+  ProspectionOfferReviewStatus,
   ProspectionStatus,
   ProspectionType,
 } from "@/db/schema";
@@ -22,6 +24,15 @@ export type ProspectionApplicationQuestionView = Omit<
   updatedAt: string;
 };
 
+export type ProspectionOfferReviewView = Omit<
+  ProspectionOfferReview,
+  "createdAt" | "updatedAt" | "reviewedAt"
+> & {
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string | null;
+};
+
 export const PROSPECTION_TYPE_LABELS: Record<ProspectionType, string> = {
   OFFER: "Offre",
   MISSION: "Mission",
@@ -37,6 +48,15 @@ export const PROSPECTION_STATUS_LABELS: Record<ProspectionStatus, string> = {
   WON: "Gagné",
   LOST: "Perdu",
   ARCHIVED: "Archivé",
+};
+
+export const PROSPECTION_OFFER_REVIEW_STATUS_LABELS: Record<
+  ProspectionOfferReviewStatus,
+  string
+> = {
+  PENDING: "À revoir",
+  IMPORTED: "Importée",
+  ARCHIVED: "Archivée",
 };
 
 export const PROSPECTION_STATUS_ORDER: ProspectionStatus[] = [
@@ -89,8 +109,28 @@ export function isProspectionApplicationQuestionsSchemaError(
   );
 }
 
+export function isProspectionOfferReviewSchemaError(
+  error: SupabaseSchemaError | null | undefined,
+) {
+  const message = error?.message?.toLowerCase() ?? "";
+  return (
+    (error?.code === "PGRST205" &&
+      message.includes("prospection_offer_review")) ||
+    (error?.code === "PGRST204" &&
+      (message.includes("prospection_offer_review") ||
+        message.includes("fit_signals") ||
+        message.includes("matched_terms"))) ||
+    error?.code === "42P01" ||
+    error?.code === "42703"
+  );
+}
+
 export function prospectionApplicationQuestionsUnavailableMessage() {
   return "Les questions de candidature ne sont pas encore disponibles. Applique la dernière migration Supabase, puis réessaie.";
+}
+
+export function prospectionOfferReviewUnavailableMessage() {
+  return "La revue des offres n'est pas encore disponible. Applique la dernière migration Supabase, puis réessaie.";
 }
 
 export function prospectionPrimaryLine(
@@ -106,6 +146,17 @@ export function serializeProspectionEntry(
     ...entry,
     createdAt: entry.createdAt.toISOString(),
     updatedAt: entry.updatedAt.toISOString(),
+  };
+}
+
+export function serializeProspectionOfferReview(
+  review: ProspectionOfferReview,
+): ProspectionOfferReviewView {
+  return {
+    ...review,
+    createdAt: review.createdAt.toISOString(),
+    updatedAt: review.updatedAt.toISOString(),
+    reviewedAt: review.reviewedAt?.toISOString() ?? null,
   };
 }
 
@@ -152,6 +203,26 @@ export function sortProspectionEntries<
       PROSPECTION_TYPE_ORDER.indexOf(left.type) -
       PROSPECTION_TYPE_ORDER.indexOf(right.type);
     if (typeDelta !== 0) return typeDelta;
+
+    return (
+      right.updatedAt.getTime() - left.updatedAt.getTime() ||
+      right.createdAt.getTime() - left.createdAt.getTime()
+    );
+  });
+}
+
+export function sortProspectionOfferReviews<
+  T extends Pick<ProspectionOfferReview, "status" | "updatedAt" | "createdAt">,
+>(reviews: T[]) {
+  const statusOrder: ProspectionOfferReviewStatus[] = [
+    "PENDING",
+    "IMPORTED",
+    "ARCHIVED",
+  ];
+  return [...reviews].sort((left, right) => {
+    const statusDelta =
+      statusOrder.indexOf(left.status) - statusOrder.indexOf(right.status);
+    if (statusDelta !== 0) return statusDelta;
 
     return (
       right.updatedAt.getTime() - left.updatedAt.getTime() ||

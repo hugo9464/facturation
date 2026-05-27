@@ -9,6 +9,7 @@ import {
   toProspectionCvGeneration,
   toProspectionCvProfile,
   toProspectionEntry,
+  toProspectionOfferReview,
   toProspectionResume,
 } from "@/lib/supabase/db";
 import {
@@ -20,11 +21,14 @@ import {
 import {
   isClosedProspectionStatus,
   isProspectionApplicationQuestionsSchemaError,
+  isProspectionOfferReviewSchemaError,
   prospectionPrimaryLine,
+  serializeProspectionOfferReview,
   serializeProspectionApplicationQuestion,
   serializeProspectionEntry,
   sortProspectionApplicationQuestions,
   sortProspectionEntries,
+  sortProspectionOfferReviews,
 } from "@/lib/prospection";
 import {
   serializeProspectionCvGeneration,
@@ -39,6 +43,9 @@ import { ProspectionCvManager } from "./prospection-cv-manager";
 import { ProspectionStatusSelect } from "./prospection-status-select";
 import { ProspectionOfferCvActions } from "./prospection-offer-cv-actions";
 import { ProspectionApplicationQuestions } from "./prospection-application-questions";
+import { CollectiveWorkScanButton } from "./collective-work-scan-button";
+import { CollectiveWorkReviewList } from "./collective-work-review-list";
+import { Badge } from "@/components/ui/badge";
 
 export default async function ProspectionPage() {
   const user = await requireUser();
@@ -49,6 +56,7 @@ export default async function ProspectionPage() {
     generationsResult,
     cvProfileResult,
     applicationQuestionsResult,
+    offerReviewsResult,
   ] = await Promise.all([
     supabase
       .from("prospection_entry")
@@ -76,6 +84,11 @@ export default async function ProspectionPage() {
       .eq("user_id", user.id)
       .order("order", { ascending: true })
       .order("created_at", { ascending: true }),
+    supabase
+      .from("prospection_offer_review")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false }),
   ]);
   if (entriesResult.error) throw entriesResult.error;
   if (resumesResult.error) throw resumesResult.error;
@@ -88,6 +101,12 @@ export default async function ProspectionPage() {
     )
   ) {
     throw applicationQuestionsResult.error;
+  }
+  if (
+    offerReviewsResult.error &&
+    !isProspectionOfferReviewSchemaError(offerReviewsResult.error)
+  ) {
+    throw offerReviewsResult.error;
   }
 
   const rows = sortProspectionEntries(
@@ -102,6 +121,14 @@ export default async function ProspectionPage() {
   const cvProfile = cvProfileResult.data
     ? serializeProspectionCvProfile(toProspectionCvProfile(cvProfileResult.data))
     : null;
+  const offerReviews = sortProspectionOfferReviews(
+    offerReviewsResult.error
+      ? []
+      : (offerReviewsResult.data ?? []).map(toProspectionOfferReview),
+  ).map(serializeProspectionOfferReview);
+  const pendingOfferReviews = offerReviews.filter(
+    (review) => review.status === "PENDING",
+  );
   const activeRows = rows.filter(
     (row) => !isClosedProspectionStatus(row.status),
   );
@@ -134,13 +161,20 @@ export default async function ProspectionPage() {
               : ""}
           </p>
         </div>
+        <CollectiveWorkScanButton />
       </div>
 
       <Tabs defaultValue="tracking">
-        <TabsList>
-          <TabsTrigger value="tracking">Suivi</TabsTrigger>
-          <TabsTrigger value="resumes">Mes CV</TabsTrigger>
-        </TabsList>
+          <TabsList>
+            <TabsTrigger value="tracking">Suivi</TabsTrigger>
+            <TabsTrigger value="review">
+              Revue
+              {pendingOfferReviews.length > 0
+                ? ` (${pendingOfferReviews.length})`
+                : ""}
+            </TabsTrigger>
+            <TabsTrigger value="resumes">Mes CV</TabsTrigger>
+          </TabsList>
 
         <TabsContent value="tracking" className="space-y-4 pt-4">
           <ProspectionForm />
@@ -176,6 +210,9 @@ export default async function ProspectionPage() {
                             entryId={entry.id}
                             status={entry.status}
                           />
+                          {entry.sourceUrl?.includes("collective.work") ? (
+                            <Badge variant="outline">Collective.work</Badge>
+                          ) : null}
                           {entry.sourceUrl ? (
                             <a
                               className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
@@ -192,6 +229,15 @@ export default async function ProspectionPage() {
                           <h2 className="truncate text-base font-medium">
                             {prospectionPrimaryLine(entry)}
                           </h2>
+                          {[entry.organization, entry.location]
+                            .filter(Boolean)
+                            .length > 0 ? (
+                            <p className="mt-1 truncate text-sm text-muted-foreground">
+                              {[entry.organization, entry.location]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex flex-wrap items-start justify-end gap-2">
@@ -214,9 +260,13 @@ export default async function ProspectionPage() {
               </div>
             </div>
           )}
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="resumes" className="pt-4">
+          <TabsContent value="review" className="space-y-4 pt-4">
+            <CollectiveWorkReviewList reviews={pendingOfferReviews} />
+          </TabsContent>
+
+          <TabsContent value="resumes" className="pt-4">
           <ProspectionCvManager cvProfile={cvProfile} resumes={resumes} />
         </TabsContent>
       </Tabs>

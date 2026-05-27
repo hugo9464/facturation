@@ -8,23 +8,33 @@ import {
   getSupabaseDb,
   toProspectionApplicationQuestion,
   toProspectionEntry,
+  toProspectionOfferReview,
   toProspectionResume,
 } from "@/lib/supabase/db";
 import { prospectionTypeEnum } from "@/db/schema";
 import {
   PROSPECTION_OFFER_STATUSES,
   isProspectionApplicationQuestionsSchemaError,
+  isProspectionOfferReviewSchemaError,
   prospectionApplicationQuestionsUnavailableMessage,
+  prospectionOfferReviewUnavailableMessage,
   serializeProspectionApplicationQuestion,
   serializeProspectionEntry,
+  serializeProspectionOfferReview,
   type ProspectionApplicationQuestionView,
   type ProspectionEntryView,
+  type ProspectionOfferReviewView,
 } from "@/lib/prospection";
 import {
   fallbackResumeMemory,
   hasResumeMemory,
   type ResumeMemory,
 } from "@/lib/prospection-cv";
+import {
+  type CollectiveWorkProspectionAnalyzedDetail,
+  type CollectiveWorkProspectionScannedDetail,
+  runCollectiveWorkProspection,
+} from "@/lib/collective-work-prospection";
 import { createStructuredOpenAIResponse } from "@/lib/openai-responses";
 
 const entrySchema = z.object({
@@ -75,11 +85,40 @@ export type ProspectionApplicationQuestionActionResult =
   | { ok: true }
   | { error: string };
 
+export type ProspectionOfferReviewActionResult =
+  | { review: ProspectionOfferReviewView; entry?: ProspectionEntryView }
+  | { ok: true }
+  | { error: string };
+
+export type ProspectionScanActionResult =
+  | {
+      ok: true;
+      scanned: number;
+      candidates: number;
+      matched: number;
+      inserted: number;
+      emailed: number;
+      errors: string[];
+      details?: {
+        scanned: CollectiveWorkProspectionScannedDetail[];
+        analyzed: CollectiveWorkProspectionAnalyzedDetail[];
+      };
+    }
+  | { error: string };
+
 function applicationQuestionErrorResult(error: unknown) {
   return isProspectionApplicationQuestionsSchemaError(
     error as { code?: string; message?: string } | null,
   )
     ? { error: prospectionApplicationQuestionsUnavailableMessage() }
+    : null;
+}
+
+function offerReviewErrorResult(error: unknown) {
+  return isProspectionOfferReviewSchemaError(
+    error as { code?: string; message?: string } | null,
+  )
+    ? { error: prospectionOfferReviewUnavailableMessage() }
     : null;
 }
 
@@ -105,6 +144,30 @@ function payloadFor(userId: string, data: z.output<typeof entrySchema>) {
   };
 }
 
+function entryPayloadForReview(userId: string, review: {
+  title: string;
+  organization: string | null;
+  sourceUrl: string;
+  location: string | null;
+  notes: string | null;
+}) {
+  return {
+    user_id: userId,
+    type: "OFFER" as const,
+    status: "TO_APPLY" as const,
+    title: review.title,
+    organization: review.organization,
+    contact_name: null,
+    email: null,
+    phone: null,
+    source_url: review.sourceUrl,
+    location: review.location,
+    target_date: null,
+    applied_at: null,
+    notes: review.notes,
+  };
+}
+
 async function ensureOwnedEntry(userId: string, entryId: string) {
   const supabase = await getSupabaseDb();
   const { data, error } = await supabase
@@ -116,6 +179,19 @@ async function ensureOwnedEntry(userId: string, entryId: string) {
   if (error) throw error;
 
   return toProspectionEntry(data);
+}
+
+async function ensureOwnedOfferReview(userId: string, reviewId: string) {
+  const supabase = await getSupabaseDb();
+  const { data, error } = await supabase
+    .from("prospection_offer_review")
+    .select("*")
+    .eq("id", reviewId)
+    .eq("user_id", userId)
+    .single();
+  if (error) throw error;
+
+  return toProspectionOfferReview(data);
 }
 
 async function nextApplicationQuestionOrder(userId: string, entryId: string) {
@@ -211,6 +287,133 @@ export async function createProspectionEntryAction(
 
   revalidatePath("/prospection");
   return { entry: serializeProspectionEntry(toProspectionEntry(data)) };
+}
+
+export async function runCollectiveWorkProspectionAction(): Promise<ProspectionScanActionResult> {
+  const user = await requireUser();
+
+  try {
+    const result = await runCollectiveWorkProspection({
+      userId: user.id,
+      includeDetails: true,
+    });
+    revalidatePath("/prospection");
+    return {
+      ok: true,
+      scanned: result.scanned,
+      candidates: result.candidates,
+      matched: result.matched,
+      inserted: result.inserted,
+      emailed: result.emailed,
+      errors: result.errors,
+      details: result.details,
+    };
+  } catch (error) {
+    const reviewSchemaError = offerReviewErrorResult(error);
+    if (reviewSchemaError) return reviewSchemaError;
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Impossible de scanner Collective.work",
+    };
+  }
+}
+
+export async function importProspectionOfferReviewAction(
+  id: string,
+): Promise<ProspectionOfferReviewActionResult> {
+  const user = await requireUser();
+  const parsedId = idSchema.safeParse(id);
+  if (!parsedId.success) return { error: "Identifiant invalide" };
+
+  try {
+    const review = await ensureOwnedOfferReview(user.id, parsedId.data);
+    if (review.status === "ARCHIVED") {
+      return { error: "Cette offre est archivée." };
+    }
+
+    const supabase = await getSupabaseDb();
+    const { data: existingEntries, error: existingError } = await supabase
+      .from("prospection_entry")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("source_url", review.sourceUrl)
+      .limit(1);
+    if (existingError) throw existingError;
+
+    const entry = existingEntries?.[0]
+      ? toProspectionEntry(existingEntries[0])
+      : await (async () => {
+          const { data, error } = await supabase
+            .from("prospection_entry")
+            .insert(entryPayloadForReview(user.id, review))
+            .select("*")
+            .single();
+          if (error) throw error;
+          return toProspectionEntry(data);
+        })();
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("prospection_offer_review")
+      .update({
+        status: "IMPORTED",
+        entry_id: entry.id,
+        reviewed_at: now,
+        updated_at: now,
+      })
+      .eq("id", review.id)
+      .eq("user_id", user.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+
+    revalidatePath("/prospection");
+    return {
+      review: serializeProspectionOfferReview(toProspectionOfferReview(data)),
+      entry: serializeProspectionEntry(entry),
+    };
+  } catch (error) {
+    const schemaError = offerReviewErrorResult(error);
+    if (schemaError) return schemaError;
+    throw error;
+  }
+}
+
+export async function archiveProspectionOfferReviewAction(
+  id: string,
+): Promise<ProspectionOfferReviewActionResult> {
+  const user = await requireUser();
+  const parsedId = idSchema.safeParse(id);
+  if (!parsedId.success) return { error: "Identifiant invalide" };
+
+  try {
+    await ensureOwnedOfferReview(user.id, parsedId.data);
+    const now = new Date().toISOString();
+    const supabase = await getSupabaseDb();
+    const { data, error } = await supabase
+      .from("prospection_offer_review")
+      .update({
+        status: "ARCHIVED",
+        reviewed_at: now,
+        updated_at: now,
+      })
+      .eq("id", parsedId.data)
+      .eq("user_id", user.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+
+    revalidatePath("/prospection");
+    return {
+      review: serializeProspectionOfferReview(toProspectionOfferReview(data)),
+    };
+  } catch (error) {
+    const schemaError = offerReviewErrorResult(error);
+    if (schemaError) return schemaError;
+    throw error;
+  }
 }
 
 export async function updateProspectionEntryAction(

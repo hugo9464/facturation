@@ -45,6 +45,17 @@ Optionnel mais recommandé si les previews Vercel sont protégées : activer Pro
 
 La route refuse de fonctionner hors `VERCEL_ENV=preview`, même si le secret est connu.
 
+## Prospection Collective.work
+
+Un cron Vercel appelle `/api/prospection/collective-work/cron` toutes les heures pour importer les nouvelles missions Collective.work qui correspondent aux CV de prospection enregistrés.
+
+Variables d'environnement :
+
+- `CRON_SECRET` : secret utilisé par Vercel Cron dans l'en-tête `Authorization: Bearer ...`.
+- `OPENAI_API_KEY` : active le matching IA. Sans clé, un fallback par mots-clés est utilisé.
+- `GMAIL_USER` et `GMAIL_APP_PASSWORD` : envoi du digest email des nouvelles missions.
+- `COLLECTIVE_WORK_SCAN_PAGES` : nombre de pages Collective.work à scanner, 3 par défaut.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
