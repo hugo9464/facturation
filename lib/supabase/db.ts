@@ -208,6 +208,7 @@ export function toTodoTask(row: Raw): TodoTask {
     title: row.title as string,
     description: (row.description as string | null) ?? null,
     status: row.status as TodoTask["status"],
+    difficulty: (row.difficulty as TodoTask["difficulty"] | null) ?? "QUICK",
     order: Number(row.order),
     previewUrl: (row.preview_url as string | null) ?? null,
     prUrl: (row.pr_url as string | null) ?? null,

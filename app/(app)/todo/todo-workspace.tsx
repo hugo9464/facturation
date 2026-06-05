@@ -52,7 +52,7 @@ import {
   type TodoProjectView,
   type TodoTaskView,
 } from "@/actions/todo";
-import type { TodoStatus } from "@/db/schema";
+import type { TodoDifficulty, TodoStatus } from "@/db/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
@@ -86,6 +86,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   nextTodoStatus,
   renderTodoPrompt,
+  TODO_DIFFICULTIES,
+  TODO_DIFFICULTY_LABELS,
   TODO_STATUSES,
   TODO_STATUS_LABELS,
 } from "@/lib/todo";
@@ -144,6 +146,19 @@ function compareTasks(a: TodoTaskView, b: TodoTaskView) {
 
 function isTodoStatus(value: string): value is TodoStatus {
   return TODO_STATUSES.includes(value as TodoStatus);
+}
+
+function isTodoDifficulty(value: string): value is TodoDifficulty {
+  return TODO_DIFFICULTIES.includes(value as TodoDifficulty);
+}
+
+function difficultyBadgeClass(difficulty: TodoDifficulty) {
+  switch (difficulty) {
+    case "QUICK":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+    case "COMPLEX":
+      return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  }
 }
 
 function statusDotClass(status: TodoStatus) {
@@ -353,6 +368,7 @@ function buildImplementationPrompt(
     title: task.title,
     project: project?.name ?? "Projet non précisé",
     status: TODO_STATUS_LABELS[task.status],
+    difficulty: TODO_DIFFICULTY_LABELS[task.difficulty],
     description: description ? description : "Aucune description fournie.",
     appUrl,
     taskId: task.id,
@@ -689,6 +705,7 @@ export function TodoWorkspace({
     title: string;
     description: string;
     status: TodoStatus;
+    difficulty: TodoDifficulty;
   }) {
     if (!activeProject) return;
 
@@ -813,7 +830,12 @@ export function TodoWorkspace({
 
   function updateTask(
     task: TodoTaskView,
-    input: { title: string; description: string; status: TodoStatus },
+    input: {
+      title: string;
+      description: string;
+      status: TodoStatus;
+      difficulty: TodoDifficulty;
+    },
   ) {
     const previous = tasks;
     markPending(task.id, true);
@@ -1842,6 +1864,15 @@ function SortableLinearTaskRow({
               {formatDate(task.completedAt)}
             </span>
           )}
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none",
+              difficultyBadgeClass(task.difficulty),
+            )}
+            title={`Niveau: ${TODO_DIFFICULTY_LABELS[task.difficulty]}`}
+          >
+            {TODO_DIFFICULTY_LABELS[task.difficulty]}
+          </span>
           {task.prUrl ? (
             <a
               href={task.prUrl}
@@ -2025,11 +2056,15 @@ function TodoTaskDialog({
     title: string;
     description: string;
     status: TodoStatus;
+    difficulty: TodoDifficulty;
   }) => void;
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [selectedStatus, setSelectedStatus] = useState<TodoStatus>(status);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<TodoDifficulty>(
+    task?.difficulty ?? "QUICK",
+  );
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const descriptionRef = React.useRef<HTMLTextAreaElement | null>(null);
   const instructionHistory = (task?.implementationJobs ?? [])
@@ -2125,7 +2160,12 @@ function TodoTaskDialog({
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit({ title, description, status: selectedStatus });
+            onSubmit({
+              title,
+              description,
+              status: selectedStatus,
+              difficulty: selectedDifficulty,
+            });
           }}
         >
           <div className="space-y-2">
@@ -2178,12 +2218,36 @@ function TodoTaskDialog({
               }}
             >
               <SelectTrigger id="todo-status" className="w-full">
-                <SelectValue />
+                <span data-slot="select-value" className="flex flex-1 text-left">
+                  {TODO_STATUS_LABELS[selectedStatus]}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {TODO_STATUSES.map((item) => (
                   <SelectItem key={item} value={item}>
                     {TODO_STATUS_LABELS[item]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="todo-difficulty">Difficulté</Label>
+            <Select
+              value={selectedDifficulty}
+              onValueChange={(value) => {
+                if (value && isTodoDifficulty(value)) setSelectedDifficulty(value);
+              }}
+            >
+              <SelectTrigger id="todo-difficulty" className="w-full">
+                <span data-slot="select-value" className="flex flex-1 text-left">
+                  {TODO_DIFFICULTY_LABELS[selectedDifficulty]}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                {TODO_DIFFICULTIES.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {TODO_DIFFICULTY_LABELS[item]}
                   </SelectItem>
                 ))}
               </SelectContent>

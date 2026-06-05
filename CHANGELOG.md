@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2] - 2026-06-05
+
+### Features
+- feat: niveau de difficulté sur les tâches de projet, avec choix `Rapide` / `Complexe`, badge inline coloré et contexte transmis à Hermes
+
+### Database
+- migration 20260604120000: enum `todo_difficulty` et colonne `difficulty` sur `todo_task`
+
 ## [0.4.1] - 2026-05-20
 
 ### Features

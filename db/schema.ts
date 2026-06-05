@@ -18,6 +18,10 @@ export const todoStatusEnum = {
   enumValues: ["TODO", "IN_PROGRESS", "TO_TEST", "DONE"] as const,
 };
 
+export const todoDifficultyEnum = {
+  enumValues: ["QUICK", "COMPLEX"] as const,
+};
+
 export const todoImplementationJobStatusEnum = {
   enumValues: [
     "QUEUED",
@@ -53,6 +57,7 @@ export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
 export type TodoStatus = (typeof todoStatusEnum.enumValues)[number];
+export type TodoDifficulty = (typeof todoDifficultyEnum.enumValues)[number];
 export type TodoImplementationJobStatus =
   (typeof todoImplementationJobStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
@@ -220,6 +225,7 @@ export type TodoTask = {
   title: string;
   description: string | null;
   status: TodoStatus;
+  difficulty: TodoDifficulty;
   order: number;
   previewUrl: string | null;
   prUrl: string | null;

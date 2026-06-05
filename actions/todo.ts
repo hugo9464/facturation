@@ -10,6 +10,7 @@ import {
   toTodoTask,
 } from "@/lib/supabase/db";
 import {
+  todoDifficultyEnum,
   todoStatusEnum,
   type TodoImplementationJob,
   type TodoProject,
@@ -53,6 +54,7 @@ import {
 import { buildTodoSummaryImplementationContext } from "@/lib/todo-task-summary-context";
 
 const statusSchema = z.enum(todoStatusEnum.enumValues);
+const difficultySchema = z.enum(todoDifficultyEnum.enumValues);
 const projectIdSchema = z.string().uuid();
 
 const projectSchema = z.object({
@@ -124,6 +126,7 @@ const createSchema = z.object({
   title: z.string().trim().min(1, "Titre requis"),
   description: z.string().trim().optional(),
   status: statusSchema.default("TODO"),
+  difficulty: difficultySchema.default("QUICK"),
 });
 
 const importEmailSchema = z.object({
@@ -135,6 +138,7 @@ const updateSchema = z.object({
   title: z.string().trim().min(1, "Titre requis"),
   description: z.string().trim().optional(),
   status: statusSchema,
+  difficulty: difficultySchema,
 });
 
 const todoAttachmentSchema = z.object({
@@ -512,6 +516,7 @@ export async function createTodoTaskAction(input: unknown) {
       title: parsed.data.title,
       description: parsed.data.description || null,
       status: parsed.data.status,
+      difficulty: parsed.data.difficulty,
       order,
       completed_at: resolveCompletedAt(parsed.data.status, null),
     })
@@ -529,6 +534,7 @@ export async function createTodoTaskAction(input: unknown) {
   if (updateError) throw updateError;
 
   revalidatePath("/todo");
+  revalidatePath(`/projects/${parsed.data.projectId}`);
   return { task: serializeTask(toTodoTask(data)) };
 }
 
@@ -616,6 +622,7 @@ export async function importTodoTasksFromEmailAction(input: unknown) {
     title: string;
     description: string | null;
     status: "TODO";
+    difficulty: "QUICK";
     order: number;
   }[] = [];
   const nextOrderByProject = new Map<string, number>();
@@ -653,6 +660,7 @@ export async function importTodoTasksFromEmailAction(input: unknown) {
       title,
       description: proposal.description?.trim() || null,
       status: "TODO",
+      difficulty: "QUICK",
       order,
     });
   }
@@ -670,6 +678,7 @@ export async function importTodoTasksFromEmailAction(input: unknown) {
     title: candidate.title,
     description: candidate.description,
     status: candidate.status,
+    difficulty: candidate.difficulty,
     order: candidate.order,
     completed_at: null,
   }));
@@ -728,6 +737,7 @@ export async function updateTodoTaskAction(id: string, input: unknown) {
       title: parsed.data.title,
       description: parsed.data.description || null,
       status: parsed.data.status,
+      difficulty: parsed.data.difficulty,
       order,
       completed_at: resolveCompletedAt(
         parsed.data.status,
@@ -742,6 +752,7 @@ export async function updateTodoTaskAction(id: string, input: unknown) {
   if (error) throw error;
 
   revalidatePath("/todo");
+  revalidatePath(`/projects/${task.projectId}`);
   return { task: serializeTask(toTodoTask(data)) };
 }
 
@@ -753,12 +764,13 @@ export async function deleteTodoTaskAction(id: string) {
     .delete()
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id")
+    .select("id, project_id")
     .maybeSingle();
   if (error) throw error;
   if (!data) return { error: "Tâche introuvable" };
 
   revalidatePath("/todo");
+  if (data.project_id) revalidatePath(`/projects/${data.project_id}`);
   return { id: data.id };
 }
 
@@ -778,6 +790,7 @@ export async function advanceTodoTaskAction(id: string) {
   const nextStatus = nextTodoStatus(task.status);
   if (!nextStatus) {
     revalidatePath("/todo");
+    revalidatePath(`/projects/${task.projectId}`);
     return { task: serializeTask(task) };
   }
 
@@ -800,6 +813,7 @@ export async function advanceTodoTaskAction(id: string) {
   if (error) throw error;
 
   revalidatePath("/todo");
+  revalidatePath(`/projects/${task.projectId}`);
   return { task: serializeTask(toTodoTask(data)) };
 }
 
@@ -890,6 +904,7 @@ export async function startTodoImplementationAction(input: unknown) {
       title: task.title,
       description: task.description,
       status: task.status,
+      difficulty: task.difficulty,
       additionalInstructions: extraInstructions,
     },
     project: {
@@ -1069,6 +1084,7 @@ export async function validateTodoImplementationAction(input: unknown) {
       title: task.title,
       description: task.description,
       status: task.status,
+      difficulty: task.difficulty,
       prUrl,
       previewUrl: sourceJob.previewUrl ?? task.previewUrl,
     },

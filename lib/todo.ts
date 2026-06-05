@@ -1,4 +1,4 @@
-import type { TodoStatus } from "@/db/schema";
+import type { TodoDifficulty, TodoStatus } from "@/db/schema";
 
 export const TODO_STATUSES = [
   "TODO",
@@ -12,6 +12,16 @@ export const TODO_STATUS_LABELS: Record<TodoStatus, string> = {
   IN_PROGRESS: "En cours",
   TO_TEST: "À valider",
   DONE: "Terminé",
+};
+
+export const TODO_DIFFICULTIES = [
+  "QUICK",
+  "COMPLEX",
+] as const satisfies readonly TodoDifficulty[];
+
+export const TODO_DIFFICULTY_LABELS: Record<TodoDifficulty, string> = {
+  QUICK: "Rapide",
+  COMPLEX: "Complexe",
 };
 
 export const TODO_STATUS_BADGE_VARIANTS = {
@@ -29,6 +39,7 @@ export const TODO_PROMPT_PLACEHOLDERS = [
   { token: "{{title}}", label: "Titre de la tâche" },
   { token: "{{project}}", label: "Nom du projet" },
   { token: "{{status}}", label: "Statut actuel" },
+  { token: "{{difficulty}}", label: "Difficulté de la tâche" },
   { token: "{{description}}", label: "Description / contexte de la tâche" },
   { token: "{{appUrl}}", label: "URL de base de l'app" },
   { token: "{{taskId}}", label: "Identifiant interne de la tâche" },
@@ -42,6 +53,7 @@ export const DEFAULT_TODO_PROMPT_TEMPLATE = `Implémente la tâche UC-{{number}}
 
 Projet: {{project}}
 Statut actuel: {{status}}
+Difficulté: {{difficulty}}
 
 Contexte de la tâche:
 {{description}}
@@ -74,6 +86,7 @@ export function renderTodoPrompt(
     title: string;
     project: string;
     status: string;
+    difficulty: string;
     description: string;
     appUrl: string;
     taskId: string;
@@ -85,6 +98,7 @@ export function renderTodoPrompt(
     .replaceAll("{{title}}", vars.title)
     .replaceAll("{{project}}", vars.project)
     .replaceAll("{{status}}", vars.status)
+    .replaceAll("{{difficulty}}", vars.difficulty)
     .replaceAll("{{description}}", vars.description)
     .replaceAll("{{appUrl}}", vars.appUrl)
     .replaceAll("{{taskId}}", vars.taskId)
