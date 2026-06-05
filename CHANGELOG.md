@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.4] - 2026-06-05
+
+### Fixes
+- fix: changement inline de difficulté sans réordonner les tâches, avec bouton d'avancement déplacé à côté de la difficulté
+
 ## [0.4.3] - 2026-06-05
 
 ### Features

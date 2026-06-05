@@ -906,8 +906,10 @@ export function TodoWorkspace({
       const updatedTask = "task" in result ? result.task : null;
       if (!updatedTask) return;
       setTasks((current) =>
-        normalizeOrders(
-          current.map((item) => (item.id === task.id ? updatedTask : item)),
+        current.map((item) =>
+          item.id === task.id
+            ? { ...item, ...updatedTask, order: item.order, status: item.status }
+            : item,
         ),
       );
       toast.success("Difficulté mise à jour");
@@ -1878,7 +1880,7 @@ function SortableLinearTaskRow({
         }
       }}
       className={cn(
-        "grid min-h-11 cursor-pointer grid-cols-[34px_84px_72px_minmax(0,1fr)_34px_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
+        "grid min-h-11 cursor-pointer grid-cols-[34px_84px_34px_72px_minmax(0,1fr)_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
         "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_minmax(0,1fr)] max-sm:gap-x-2 max-sm:gap-y-2 max-sm:px-3 max-sm:py-3",
         isDragging && "relative z-10 shadow-2xl shadow-black/40",
         pending && "opacity-60",
@@ -1916,7 +1918,20 @@ function SortableLinearTaskRow({
       >
         {TODO_DIFFICULTY_LABELS[task.difficulty]}
       </button>
-      <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89] max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-[5.5rem] max-sm:px-0 max-sm:text-[11px]">
+      <button
+        type="button"
+        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40 max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-[5.5rem] max-sm:justify-self-start"
+        disabled={!nextStatus || pending}
+        onClick={(event) => {
+          event.stopPropagation();
+          onAdvance(task);
+        }}
+        aria-label="Avancer"
+        title={nextStatus ? `Passer à ${TODO_STATUS_LABELS[nextStatus]}` : ""}
+      >
+        <Check className="size-3.5 stroke-[2.2]" />
+      </button>
+      <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89] max-sm:col-start-2 max-sm:row-start-4 max-sm:px-0 max-sm:text-[11px]">
         UC-{task.number}
       </span>
       <div className="min-w-0 px-1.5 py-1 max-sm:col-start-2 max-sm:row-span-2 max-sm:px-0 max-sm:py-0">
@@ -2006,19 +2021,6 @@ function SortableLinearTaskRow({
           </div>
         ) : null}
       </div>
-      <button
-        type="button"
-        className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-white/[0.06] hover:text-[#f2f2f4] disabled:opacity-40 max-sm:col-start-1 max-sm:row-start-3"
-        disabled={!nextStatus || pending}
-        onClick={(event) => {
-          event.stopPropagation();
-          onAdvance(task);
-        }}
-        aria-label="Avancer"
-        title={nextStatus ? `Passer à ${TODO_STATUS_LABELS[nextStatus]}` : ""}
-      >
-        <Check className="size-3.5 stroke-[2.2]" />
-      </button>
       <button
         type="button"
         className="grid size-7 place-items-center justify-self-center rounded-full text-[#8d8d99] transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-40 max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-auto max-sm:mr-[9rem]"
