@@ -1,0 +1,6 @@
+interface:
+  display_name: "Deploy"
+  short_description: "Bump version and push release"
+  default_prompt: "Use $deploy to bump the version cleanly and push the current branch."
+policy:
+  allow_implicit_invocation: false

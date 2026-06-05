@@ -41,6 +41,10 @@ yarn-error.log*
 next-env.d.ts
 
 # local agent tooling
-.codex/
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/deploy/
+!.codex/skills/deploy/**
 .claude/worktrees/
 .lanes/
