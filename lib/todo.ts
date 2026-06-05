@@ -24,6 +24,12 @@ export const TODO_DIFFICULTY_LABELS: Record<TodoDifficulty, string> = {
   COMPLEX: "Complexe",
 };
 
+export function nextTodoDifficulty(
+  difficulty: TodoDifficulty,
+): TodoDifficulty {
+  return difficulty === "QUICK" ? "COMPLEX" : "QUICK";
+}
+
 export const TODO_STATUS_BADGE_VARIANTS = {
   TODO: "secondary",
   IN_PROGRESS: "default",

@@ -84,6 +84,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  nextTodoDifficulty,
   nextTodoStatus,
   renderTodoPrompt,
   TODO_DIFFICULTIES,
@@ -872,6 +873,47 @@ export function TodoWorkspace({
     });
   }
 
+  function updateTaskDifficulty(task: TodoTaskView) {
+    const difficulty = nextTodoDifficulty(task.difficulty);
+    const previous = tasks;
+    markPending(task.id, true);
+    setTasks((current) =>
+      current.map((item) =>
+        item.id === task.id ? { ...item, difficulty } : item,
+      ),
+    );
+    startTransition(async () => {
+      let result: Awaited<ReturnType<typeof updateTodoTaskAction>>;
+      try {
+        result = await updateTodoTaskAction(task.id, {
+          title: task.title,
+          description: task.description ?? "",
+          status: task.status,
+          difficulty,
+        });
+      } catch (error) {
+        markPending(task.id, false);
+        setTasks(previous);
+        toast.error(error instanceof Error ? error.message : "Mise à jour impossible");
+        return;
+      }
+      markPending(task.id, false);
+      if ("error" in result && result.error) {
+        setTasks(previous);
+        toast.error(result.error);
+        return;
+      }
+      const updatedTask = "task" in result ? result.task : null;
+      if (!updatedTask) return;
+      setTasks((current) =>
+        normalizeOrders(
+          current.map((item) => (item.id === task.id ? updatedTask : item)),
+        ),
+      );
+      toast.success("Difficulté mise à jour");
+    });
+  }
+
   function deleteTask(task: TodoTaskView) {
     const previous = tasks;
     markPending(task.id, true);
@@ -1025,6 +1067,7 @@ export function TodoWorkspace({
                 onEdit={setEditingTask}
                 onDelete={setTaskToDelete}
                 onAdvance={advanceTask}
+                onUpdateDifficulty={updateTaskDifficulty}
                 onCopyPrompt={copyTaskPrompt}
                 onStartImplementation={(task) => {
                   if (task.implementationJob) setImplementationDialogTask(task);
@@ -1513,6 +1556,7 @@ type TodoViewProps = {
   onEdit: (task: TodoTaskView) => void;
   onDelete: (task: TodoTaskView) => void;
   onAdvance: (task: TodoTaskView) => void;
+  onUpdateDifficulty: (task: TodoTaskView) => void;
 };
 
 type TodoLinearViewProps = TodoViewProps & {
@@ -1531,6 +1575,7 @@ function TodoLinearListView({
   onEdit,
   onDelete,
   onAdvance,
+  onUpdateDifficulty,
   onCopyPrompt,
   onStartImplementation,
   onValidateImplementation,
@@ -1566,6 +1611,7 @@ function TodoLinearListView({
               onEdit={onEdit}
               onDelete={onDelete}
               onAdvance={onAdvance}
+              onUpdateDifficulty={onUpdateDifficulty}
               onCopyPrompt={onCopyPrompt}
               onStartImplementation={onStartImplementation}
               onValidateImplementation={onValidateImplementation}
@@ -1580,6 +1626,7 @@ function TodoLinearListView({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onAdvance={onAdvance}
+                onUpdateDifficulty={onUpdateDifficulty}
                 onCopyPrompt={onCopyPrompt}
                 onStartImplementation={onStartImplementation}
                 onValidateImplementation={onValidateImplementation}
@@ -1603,6 +1650,7 @@ function TodoLinearSection({
   onEdit,
   onDelete,
   onAdvance,
+  onUpdateDifficulty,
   onCopyPrompt,
   onStartImplementation,
   onValidateImplementation,
@@ -1682,6 +1730,7 @@ function TodoLinearSection({
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onAdvance={onAdvance}
+                  onUpdateDifficulty={onUpdateDifficulty}
                   onCopyPrompt={onCopyPrompt}
                   onStartImplementation={onStartImplementation}
                   onValidateImplementation={onValidateImplementation}
@@ -1703,6 +1752,7 @@ function TodoHermesTransitionSection({
   onEdit,
   onDelete,
   onAdvance,
+  onUpdateDifficulty,
   onCopyPrompt,
   onStartImplementation,
   onValidateImplementation,
@@ -1741,6 +1791,7 @@ function TodoHermesTransitionSection({
               onEdit={onEdit}
               onDelete={onDelete}
               onAdvance={onAdvance}
+              onUpdateDifficulty={onUpdateDifficulty}
               onCopyPrompt={onCopyPrompt}
               onStartImplementation={onStartImplementation}
               onValidateImplementation={onValidateImplementation}
@@ -1759,6 +1810,7 @@ function SortableLinearTaskRow({
   onEdit,
   onDelete,
   onAdvance,
+  onUpdateDifficulty,
   onCopyPrompt,
   onStartImplementation,
   onValidateImplementation,
@@ -1766,6 +1818,7 @@ function SortableLinearTaskRow({
   onCopyPrompt: (task: TodoTaskView) => void;
   onStartImplementation: (task: TodoTaskView) => void;
   onValidateImplementation: (task: TodoTaskView) => void;
+  onUpdateDifficulty: (task: TodoTaskView) => void;
 }) {
   const {
     attributes,
@@ -1805,6 +1858,7 @@ function SortableLinearTaskRow({
     jobStatus: task.implementationJob?.status,
     jobAgent: task.implementationJob?.agent,
   });
+  const nextDifficulty = nextTodoDifficulty(task.difficulty);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1824,7 +1878,7 @@ function SortableLinearTaskRow({
         }
       }}
       className={cn(
-        "grid min-h-11 cursor-pointer grid-cols-[34px_72px_minmax(0,1fr)_34px_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
+        "grid min-h-11 cursor-pointer grid-cols-[34px_84px_72px_minmax(0,1fr)_34px_34px_34px_34px_34px] items-center border-b border-[#2a2a30] bg-[#1d1d21] px-4 text-[#f0f0f2] last:border-b-0",
         "transition-colors hover:bg-[#24242a] max-sm:grid-cols-[30px_minmax(0,1fr)] max-sm:gap-x-2 max-sm:gap-y-2 max-sm:px-3 max-sm:py-3",
         isDragging && "relative z-10 shadow-2xl shadow-black/40",
         pending && "opacity-60",
@@ -1841,7 +1895,28 @@ function SortableLinearTaskRow({
       >
         <GripVertical className="size-4 stroke-[1.9]" aria-hidden="true" />
       </button>
-      <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89] max-sm:order-3 max-sm:col-start-2 max-sm:px-0 max-sm:text-[11px]">
+      <button
+        type="button"
+        className={cn(
+          "inline-flex h-6 w-20 items-center justify-center rounded-full border px-2 text-[10px] font-semibold uppercase leading-none transition-colors disabled:opacity-50",
+          difficultyBadgeClass(task.difficulty),
+          task.difficulty === "QUICK"
+            ? "hover:bg-emerald-500/20"
+            : "hover:bg-sky-500/20",
+          "max-sm:col-start-2 max-sm:row-start-3 max-sm:justify-self-start",
+        )}
+        disabled={pending}
+        onClick={(event) => {
+          event.stopPropagation();
+          onUpdateDifficulty(task);
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+        aria-label={`Difficulté ${TODO_DIFFICULTY_LABELS[task.difficulty]}. Passer en ${TODO_DIFFICULTY_LABELS[nextDifficulty]}`}
+        title={`Difficulté: ${TODO_DIFFICULTY_LABELS[task.difficulty]}. Cliquer pour passer en ${TODO_DIFFICULTY_LABELS[nextDifficulty]}`}
+      >
+        {TODO_DIFFICULTY_LABELS[task.difficulty]}
+      </button>
+      <span className="truncate px-1.5 text-left font-mono text-xs font-medium text-[#7c7c89] max-sm:col-start-2 max-sm:row-start-3 max-sm:ml-[5.5rem] max-sm:px-0 max-sm:text-[11px]">
         UC-{task.number}
       </span>
       <div className="min-w-0 px-1.5 py-1 max-sm:col-start-2 max-sm:row-span-2 max-sm:px-0 max-sm:py-0">
@@ -1864,15 +1939,6 @@ function SortableLinearTaskRow({
               {formatDate(task.completedAt)}
             </span>
           )}
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none",
-              difficultyBadgeClass(task.difficulty),
-            )}
-            title={`Niveau: ${TODO_DIFFICULTY_LABELS[task.difficulty]}`}
-          >
-            {TODO_DIFFICULTY_LABELS[task.difficulty]}
-          </span>
           {task.prUrl ? (
             <a
               href={task.prUrl}

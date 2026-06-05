@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.3] - 2026-06-05
+
+### Features
+- feat: difficulté des tâches affichée en début de ligne et modifiable inline sans ouvrir le détail
+
 ## [0.4.2] - 2026-06-05
 
 ### Features
