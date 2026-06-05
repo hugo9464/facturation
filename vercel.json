@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/prospection/collective-work/cron",
-      "schedule": "0 * * * *"
-    }
-  ]
-}
