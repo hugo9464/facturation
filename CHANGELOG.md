@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.6] - 2026-06-09
+
+### Fixes
+- fix: compatibilité Vercel avec les environnements Supabase qui utilisent encore `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
 ## [0.4.5] - 2026-06-09
 
 ### Features
