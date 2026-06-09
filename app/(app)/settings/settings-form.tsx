@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { upsertProfileAction } from "@/actions/profile";
 import type { Profile } from "@/db/schema";
 import {
-  DEFAULT_TODO_PROMPT_TEMPLATE,
+  resolveTodoPromptTemplate,
   TODO_PROMPT_PLACEHOLDERS,
 } from "@/lib/todo";
 
@@ -180,9 +180,7 @@ export function SettingsForm({
           <Textarea
             id="todo_prompt_template"
             name="todo_prompt_template"
-            defaultValue={
-              initial?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE
-            }
+            defaultValue={resolveTodoPromptTemplate(initial?.todoPromptTemplate)}
             rows={14}
             className="font-mono text-xs"
           />

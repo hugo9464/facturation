@@ -118,7 +118,10 @@ export function isProspectionOfferReviewSchemaError(
       message.includes("prospection_offer_review")) ||
     (error?.code === "PGRST204" &&
       (message.includes("prospection_offer_review") ||
+        message.includes("accepted") ||
+        message.includes("ai_matches") ||
         message.includes("fit_signals") ||
+        message.includes("heuristic_score") ||
         message.includes("matched_terms"))) ||
     error?.code === "42P01" ||
     error?.code === "42703"

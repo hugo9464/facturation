@@ -55,7 +55,8 @@ export const TODO_PROMPT_PLACEHOLDERS = [
   },
 ] as const;
 
-export const DEFAULT_TODO_PROMPT_TEMPLATE = `Implémente la tâche UC-{{number}}: {{title}}
+const LEGACY_DEFAULT_TODO_PROMPT_TEMPLATES = [
+  `Implémente la tâche UC-{{number}}: {{title}}
 
 Projet: {{project}}
 Statut actuel: {{status}}
@@ -83,7 +84,37 @@ Déploiement:
     -d '{"previewUrl": "<URL_PREVIEW_VERCEL>", "prUrl": "<URL_PULL_REQUEST>"}'
 
 - Termine ta réponse en donnant le lien de la Pull Request et le lien de
-  preview Vercel.`;
+  preview Vercel.`,
+];
+
+export const DEFAULT_TODO_PROMPT_TEMPLATE = `Implémente la tâche UC-{{number}}: {{title}}
+
+Projet: {{project}}
+Statut actuel: {{status}}
+Difficulté: {{difficulty}}
+
+Contexte de la tâche:
+{{description}}
+
+Consignes:
+- Analyse rapidement le code existant pour identifier la page et les fichiers concernés.
+- Implémente simplement la tâche en respectant les conventions du projet.
+- Garde les changements ciblés sur cette tâche.
+- Crée des données de test si nécessaire, en utilisant l'immeuble Morimont 72 comme donnée de référence.
+- Lance l'app en local.
+- Ouvre le Browser Codex sur la bonne page pour tester la tâche.
+- Vérifie le comportement avec les commandes de lint/build/test pertinentes si le changement le justifie.
+
+Termine ta réponse en indiquant ce qui a été implémenté, les données de test créées le cas échéant, l'URL locale ouverte dans le Browser Codex et les vérifications effectuées.`;
+
+export function resolveTodoPromptTemplate(template?: string | null): string {
+  const trimmedTemplate = template?.trim();
+  if (!trimmedTemplate) return DEFAULT_TODO_PROMPT_TEMPLATE;
+  if (LEGACY_DEFAULT_TODO_PROMPT_TEMPLATES.includes(trimmedTemplate)) {
+    return DEFAULT_TODO_PROMPT_TEMPLATE;
+  }
+  return trimmedTemplate;
+}
 
 export function renderTodoPrompt(
   template: string,

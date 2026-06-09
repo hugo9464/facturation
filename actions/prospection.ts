@@ -309,6 +309,7 @@ export async function runCollectiveWorkProspectionAction(): Promise<ProspectionS
       details: result.details,
     };
   } catch (error) {
+    console.error("Collective.work prospection scan failed", error);
     const reviewSchemaError = offerReviewErrorResult(error);
     if (reviewSchemaError) return reviewSchemaError;
     return {

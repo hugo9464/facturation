@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.5] - 2026-06-09
+
+### Features
+- feat: nouveau prompt par défaut pour les tâches todo, orienté test local dans le Browser Codex et données Morimont 72
+- feat: remplacement automatique de l'ancien prompt todo intégré par le nouveau prompt par défaut, tout en conservant les prompts personnalisés
+- feat: détails du scan manuel Collective.work avec offres scannées, offres analysées, scores et signaux de matching
+
+### Fixes
+- fix: meilleure gestion des erreurs du scan Collective.work côté client et serveur
+- fix: affichage du verdict final des offres Collective.work après seuil de matching
+
 ## [0.4.4] - 2026-06-05
 
 ### Fixes

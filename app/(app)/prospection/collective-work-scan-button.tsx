@@ -79,20 +79,28 @@ export function CollectiveWorkScanButton() {
 
   function onClick() {
     start(async () => {
-      const result = await runCollectiveWorkProspectionAction();
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
+      try {
+        const result = await runCollectiveWorkProspectionAction();
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
 
-      setLastResult(result);
-      const summary = scanSummary(result);
-      if (result.inserted > 0) {
-        toast.success(scanDetail(result), { description: summary });
-      } else {
-        toast.info(scanDetail(result), { description: summary });
+        setLastResult(result);
+        const summary = scanSummary(result);
+        if (result.inserted > 0) {
+          toast.success(scanDetail(result), { description: summary });
+        } else {
+          toast.info(scanDetail(result), { description: summary });
+        }
+        router.refresh();
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Impossible de scanner Collective.work",
+        );
       }
-      router.refresh();
     });
   }
 

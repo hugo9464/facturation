@@ -13,7 +13,7 @@ import {
   toTodoTask,
 } from "@/lib/supabase/db";
 import type { TodoImplementationJob, TodoProject, TodoTask } from "@/db/schema";
-import { DEFAULT_TODO_PROMPT_TEMPLATE } from "@/lib/todo";
+import { resolveTodoPromptTemplate } from "@/lib/todo";
 import { getAppUrl, previewTokenFor } from "@/lib/todo-preview";
 
 function serializeTodoImplementationJob(
@@ -99,8 +99,7 @@ export default async function TodoPage() {
   }
 
   const profile = await getProfile(user.id);
-  const promptTemplate =
-    profile?.todoPromptTemplate ?? DEFAULT_TODO_PROMPT_TEMPLATE;
+  const promptTemplate = resolveTodoPromptTemplate(profile?.todoPromptTemplate);
   const appUrl = await getAppUrl();
 
   return (
