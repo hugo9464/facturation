@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { getSupabaseDb, toJobOffer } from "@/lib/supabase/db";
-import { updateJobOfferStatusAction } from "@/actions/job-offers";
+import { getSupabaseDb, toJobOffer, toJobOfferAgentFeedback } from "@/lib/supabase/db";
+import { saveJobOfferAgentFeedbackAction, updateJobOfferStatusAction } from "@/actions/job-offers";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import {
@@ -78,6 +78,15 @@ export default async function JobOffersPage({
   if (error) throw error;
   const offers = (data ?? []).map(toJobOffer);
 
+  const { data: feedbackRows, error: feedbackError } = await supabase
+    .from("job_offer_agent_feedback")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (feedbackError) throw feedbackError;
+  const feedback = (feedbackRows ?? []).map(toJobOfferAgentFeedback);
+
   return (
     <div className="max-w-6xl space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -90,6 +99,43 @@ export default async function JobOffersPage({
         </div>
         <Badge variant="outline">{offers.length} offre{offers.length > 1 ? "s" : ""}</Badge>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Adapter l&apos;agent</CardTitle>
+          <CardDescription>
+            Envoie une consigne en langage naturel. Exemple : “Cherche avec un salaire minimum de 60k€”.
+            Elle sera prise en compte lors des prochains rafraîchissements.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form action={saveJobOfferAgentFeedbackAction} className="space-y-3">
+            <textarea
+              name="message"
+              required
+              minLength={3}
+              maxLength={1200}
+              rows={3}
+              placeholder="Ex: privilégie les missions remote, ignore les CDI, salaire minimum 60k€..."
+              className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+            />
+            <Button type="submit" size="sm">Envoyer à l&apos;agent</Button>
+          </form>
+          {feedback.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Derniers retours envoyés</p>
+              <div className="grid gap-2">
+                {feedback.map((item) => (
+                  <div key={item.id} className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                    <p>{item.message}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Envoyé le {formatDate(item.createdAt)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <div className="flex flex-wrap gap-2">
         {(["NEW", "SAVED", "APPLIED", "IGNORED"] as JobOfferStatus[]).map((item) => (

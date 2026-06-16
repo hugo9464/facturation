@@ -18,14 +18,29 @@ export type RankedJobOffer = RawJobOffer & {
   matchScore: number;
 };
 
+export type JobOfferFeedbackPreferences = {
+  rawFeedback: string;
+  minimumAnnualSalaryEur: number | null;
+};
+
 const SEARCH_TERMS = [
   "product builder",
+  "product builder france",
   "no-code",
+  "no-code france",
   "low-code",
+  "low-code france",
   "ai automation",
+  "ai automation france",
   "ai product",
+  "ai product france",
   "automation specialist",
+  "automation specialist france",
   "technical builder",
+  "product manager france",
+  "chef de projet ia",
+  "consultant no-code",
+  "consultant automatisation",
 ];
 
 const MATCH_KEYWORDS = [
@@ -66,6 +81,31 @@ const NEGATIVE_KEYWORDS = [
   "data scientist phd",
 ];
 
+const FRANCE_KEYWORDS = [
+  "france",
+  "french",
+  "français",
+  "francaise",
+  "française",
+  "paris",
+  "lyon",
+  "marseille",
+  "toulouse",
+  "bordeaux",
+  "lille",
+  "nantes",
+  "rennes",
+  "montpellier",
+  "strasbourg",
+  "nice",
+  "grenoble",
+  "remote france",
+  "france remote",
+  "remote from france",
+  "télétravail",
+  "teletravail",
+];
+
 const MAX_DESCRIPTION_LENGTH = 1800;
 
 function compactText(value: unknown): string | null {
@@ -97,6 +137,42 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
 }
 
+export function parseJobOfferFeedbackPreferences(feedback: string | null | undefined): JobOfferFeedbackPreferences {
+  const rawFeedback = typeof feedback === "string" ? feedback.trim() : "";
+  const normalized = rawFeedback.toLowerCase().replace(/\s+/g, " ");
+  const salaryContext = /(?:salaire|rémunération|remuneration|tj[mh]|minimum|min|au moins|à partir de|a partir de)/i;
+  let minimumAnnualSalaryEur: number | null = null;
+
+  for (const match of Array.from(normalized.matchAll(/(\d{2,3})(?:\s?)(k|000)?\s?(?:€|eur|euros|k€)?/gi))) {
+    const index = match.index ?? 0;
+    const context = normalized.slice(Math.max(0, index - 45), Math.min(normalized.length, index + 45));
+    if (!salaryContext.test(context)) continue;
+    const base = Number(match[1]);
+    const amount = match[2] === "000" || match[2] === "k" || base < 1000 ? base * 1000 : base;
+    if (amount >= 10_000) minimumAnnualSalaryEur = Math.max(minimumAnnualSalaryEur ?? 0, amount);
+  }
+
+  return { rawFeedback, minimumAnnualSalaryEur };
+}
+
+function salaryBoundsAnnualEur(salary: string | null | undefined): { min: number; max: number } | null {
+  if (!salary) return null;
+  const normalized = salary.toLowerCase().replace(/,/g, ".").replace(/\s+/g, " ");
+  const values = Array.from(normalized.matchAll(/(\d+(?:\.\d+)?)(?:\s?)(k|000)?\s?(?:€|eur|euros|k€)?/gi))
+    .map((match) => {
+      const value = Number(match[1]);
+      if (!Number.isFinite(value)) return null;
+      let amount = match[2] === "000" || match[2] === "k" || value < 1000 ? value * 1000 : value;
+      if (/(?:jour|day|daily|tj[mh])/.test(normalized)) amount *= 220;
+      if (/(?:mois|month|mensuel)/.test(normalized)) amount *= 12;
+      return Math.round(amount);
+    })
+    .filter((value): value is number => value !== null && value >= 1000);
+
+  if (values.length === 0) return null;
+  return { min: Math.min(...values), max: Math.max(...values) };
+}
+
 function keywordMatches(haystack: string, keyword: string): boolean {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = keyword.length <= 4 || !keyword.includes(" ")
@@ -119,6 +195,11 @@ function rankOffer(offer: RawJobOffer): RankedJobOffer | null {
     .join(" ")
     .toLowerCase();
 
+  const isFranceOffer = FRANCE_KEYWORDS.some((keyword) =>
+    keywordMatches(haystack, keyword),
+  );
+  if (!isFranceOffer) return null;
+
   const matchedKeywords = MATCH_KEYWORDS.filter((keyword) =>
     keywordMatches(haystack, keyword),
   );
@@ -140,6 +221,30 @@ function rankOffer(offer: RawJobOffer): RankedJobOffer | null {
     matchedKeywords: unique(matchedKeywords),
     matchScore: score,
   };
+}
+
+export function rankJobOffersForPreferences(
+  offers: RawJobOffer[],
+  preferences: JobOfferFeedbackPreferences = parseJobOfferFeedbackPreferences(null),
+): RankedJobOffer[] {
+  const byUrl = new Map<string, RankedJobOffer>();
+  for (const rawOffer of offers) {
+    const ranked = rankOffer(rawOffer);
+    if (!ranked) continue;
+
+    if (preferences.minimumAnnualSalaryEur != null) {
+      const bounds = salaryBoundsAnnualEur(ranked.salary);
+      if (!bounds || bounds.max < preferences.minimumAnnualSalaryEur) continue;
+      ranked.matchScore += 8;
+    }
+
+    const existing = byUrl.get(ranked.sourceUrl);
+    if (!existing || ranked.matchScore > existing.matchScore) {
+      byUrl.set(ranked.sourceUrl, ranked);
+    }
+  }
+
+  return Array.from(byUrl.values()).sort((a, b) => b.matchScore - a.matchScore);
 }
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -235,21 +340,42 @@ async function scrapeArbeitnow(): Promise<RawJobOffer[]> {
     .filter((offer): offer is RawJobOffer => offer !== null);
 }
 
-export async function scrapeJobOffers(): Promise<RankedJobOffer[]> {
-  const results = await Promise.allSettled([scrapeRemotive(), scrapeArbeitnow()]);
-  const rawOffers = results.flatMap((result) =>
+async function scrapeRemoteOk(): Promise<RawJobOffer[]> {
+  const payload = await fetchJson("https://remoteok.com/api");
+  const jobs = Array.isArray(payload) ? (payload.slice(1) as Record<string, unknown>[]) : [];
+
+  return jobs
+    .map((job): RawJobOffer | null => {
+      const url = normalizeUrl(job.url ?? job.apply_url);
+      const title = compactText(job.position);
+      if (!url || !title) return null;
+      const tags = Array.isArray(job.tags) ? job.tags.map(String) : [];
+      return {
+        source: "RemoteOK",
+        sourceId: job.id == null ? null : String(job.id),
+        sourceUrl: url,
+        title,
+        company: compactText(job.company),
+        location: compactText(job.location),
+        remote: true,
+        contractType: null,
+        salary: compactText(job.salary),
+        description: compactText(job.description),
+        tags,
+        publishedAt: parseDate(job.date),
+      };
+    })
+    .filter((offer): offer is RawJobOffer => offer !== null);
+}
+
+export async function scrapeRawJobOffers(): Promise<RawJobOffer[]> {
+  const results = await Promise.allSettled([scrapeRemotive(), scrapeArbeitnow(), scrapeRemoteOk()]);
+  return results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : [],
   );
+}
 
-  const byUrl = new Map<string, RankedJobOffer>();
-  for (const rawOffer of rawOffers) {
-    const ranked = rankOffer(rawOffer);
-    if (!ranked) continue;
-    const existing = byUrl.get(ranked.sourceUrl);
-    if (!existing || ranked.matchScore > existing.matchScore) {
-      byUrl.set(ranked.sourceUrl, ranked);
-    }
-  }
-
-  return Array.from(byUrl.values()).sort((a, b) => b.matchScore - a.matchScore);
+export async function scrapeJobOffers(feedback?: string | null): Promise<RankedJobOffer[]> {
+  const rawOffers = await scrapeRawJobOffers();
+  return rankJobOffersForPreferences(rawOffers, parseJobOfferFeedbackPreferences(feedback));
 }

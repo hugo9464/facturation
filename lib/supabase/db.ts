@@ -19,6 +19,7 @@ import type {
   TodoImplementationJob,
   TodoTask,
   JobOffer,
+  JobOfferAgentFeedback,
 } from "@/db/schema";
 
 type Raw = Record<string, unknown>;
@@ -353,6 +354,15 @@ export function toJobOffer(row: Raw): JobOffer {
     lastSeenAt: requiredDate(row.last_seen_at),
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
+  };
+}
+
+export function toJobOfferAgentFeedback(row: Raw): JobOfferAgentFeedback {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    message: row.message as string,
+    createdAt: requiredDate(row.created_at),
   };
 }
 

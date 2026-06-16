@@ -404,3 +404,12 @@ export type JobOffer = {
 };
 
 export type NewJobOffer = Omit<JobOffer, "id" | "createdAt" | "updatedAt">;
+
+export type JobOfferAgentFeedback = {
+  id: string;
+  userId: string;
+  message: string;
+  createdAt: Date;
+};
+
+export type NewJobOfferAgentFeedback = Omit<JobOfferAgentFeedback, "id" | "createdAt">;
