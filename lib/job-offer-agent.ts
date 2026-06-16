@@ -13,6 +13,10 @@ export type JobOfferScrapeResult = {
   users: number;
 };
 
+export type JobOfferScrapeOptions = {
+  userIds?: string[];
+};
+
 function toInsertRow(userId: string, offer: RankedJobOffer) {
   return {
     user_id: userId,
@@ -35,19 +39,22 @@ function toInsertRow(userId: string, offer: RankedJobOffer) {
   };
 }
 
-export async function runJobOfferScrape(): Promise<JobOfferScrapeResult> {
+export async function runJobOfferScrape(options: JobOfferScrapeOptions = {}): Promise<JobOfferScrapeResult> {
   const admin = createAdminClient();
   const rawOffers = await scrapeRawJobOffers();
   if (rawOffers.length === 0) {
     return { scraped: 0, inserted: 0, refreshed: 0, users: 0 };
   }
 
-  const { data: profiles, error: profilesError } = await admin
-    .from("profile")
-    .select("user_id");
-  if (profilesError) throw profilesError;
+  const profiles = options.userIds
+    ? options.userIds.map((userId) => ({ user_id: userId }))
+    : await (async () => {
+        const { data, error } = await admin.from("profile").select("user_id");
+        if (error) throw error;
+        return data ?? [];
+      })();
 
-  const userIds = (profiles ?? []).map((profile) => profile.user_id as string);
+  const userIds = profiles.map((profile) => profile.user_id as string);
   const feedbackByUserId = new Map<string, string[]>();
   if (userIds.length > 0) {
     const { data: feedbackRows, error: feedbackError } = await admin

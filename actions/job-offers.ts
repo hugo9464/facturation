@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
+import { runJobOfferScrape } from "@/lib/job-offer-agent";
 import { getSupabaseDb } from "@/lib/supabase/db";
 
 const jobOfferStatusSchema = z.enum(["NEW", "SAVED", "IGNORED", "APPLIED"]);
@@ -19,6 +20,13 @@ export async function saveJobOfferAgentFeedbackAction(formData: FormData) {
   });
 
   if (error) throw error;
+  revalidatePath("/job-offers");
+}
+
+export async function retriggerJobOfferSearchAction() {
+  const user = await requireUser();
+
+  await runJobOfferScrape({ userIds: [user.id] });
   revalidatePath("/job-offers");
 }
 

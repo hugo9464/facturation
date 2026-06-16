@@ -2,7 +2,11 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseDb, toJobOffer, toJobOfferAgentFeedback } from "@/lib/supabase/db";
-import { saveJobOfferAgentFeedbackAction, updateJobOfferStatusAction } from "@/actions/job-offers";
+import {
+  retriggerJobOfferSearchAction,
+  saveJobOfferAgentFeedbackAction,
+  updateJobOfferStatusAction,
+} from "@/actions/job-offers";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import {
@@ -97,7 +101,12 @@ export default async function JobOffersPage({
             Les offres sont rafraîchies toutes les heures.
           </p>
         </div>
-        <Badge variant="outline">{offers.length} offre{offers.length > 1 ? "s" : ""}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{offers.length} offre{offers.length > 1 ? "s" : ""}</Badge>
+          <form action={retriggerJobOfferSearchAction}>
+            <Button type="submit" size="sm" variant="outline">Relancer la recherche</Button>
+          </form>
+        </div>
       </div>
 
       <Card>
@@ -105,7 +114,7 @@ export default async function JobOffersPage({
           <CardTitle>Adapter l&apos;agent</CardTitle>
           <CardDescription>
             Envoie une consigne en langage naturel. Exemple : “Cherche avec un salaire minimum de 60k€”.
-            Elle sera prise en compte lors des prochains rafraîchissements.
+            Elle sera prise en compte lors des prochains rafraîchissements ou dès que tu relances la recherche.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
