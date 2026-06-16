@@ -1,39 +1,75 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { retriggerJobOfferSearchAction } from "@/actions/job-offers";
 import { Button } from "@/components/ui/button";
 
+function plural(value: number, singular: string, pluralLabel: string = `${singular}s`) {
+  return `${value} ${value > 1 ? pluralLabel : singular}`;
+}
+
 export function RetriggerSearchButton() {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [refreshPending, startRefreshTransition] = useTransition();
+  const [isSearching, setIsSearching] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const pending = isSearching || refreshPending;
 
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      disabled={pending}
-      onClick={() => {
-        startTransition(async () => {
-          const result = await retriggerJobOfferSearchAction();
-          if (!result.ok) {
-            toast.error(result.error);
-            return;
-          }
+    <div className="flex max-w-sm flex-col items-start gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={pending}
+        onClick={async () => {
+          setIsSearching(true);
+          setStatusMessage("Recherche en cours… l'agent analyse les offres disponibles.");
+          const toastId = toast.loading("Recherche d'offres en cours…");
 
-          toast.success(
-            `Recherche terminée : ${result.inserted} nouvelle${result.inserted > 1 ? "s" : ""} offre${
-              result.inserted > 1 ? "s" : ""
-            }, ${result.refreshed} mise${result.refreshed > 1 ? "s" : ""} à jour.`,
-          );
-          router.refresh();
-        });
-      }}
-    >
-      {pending ? "Recherche en cours…" : "Relancer la recherche"}
-    </Button>
+          try {
+            const result = await retriggerJobOfferSearchAction();
+            if (!result.ok) {
+              setStatusMessage(result.error);
+              toast.error(result.error, { id: toastId });
+              return;
+            }
+
+            const summary =
+              result.inserted + result.refreshed > 0
+                ? `Recherche terminée : ${plural(result.inserted, "nouvelle offre")}, ${plural(
+                    result.refreshed,
+                    "mise à jour",
+                  )}. ${plural(result.scraped, "offre analysée")}.`
+                : `Recherche terminée : ${plural(
+                    result.scraped,
+                    "offre analysée",
+                  )}, aucune nouvelle offre pertinente trouvée pour tes critères.`;
+
+            setStatusMessage(summary);
+            toast.success(summary, { id: toastId });
+            startRefreshTransition(() => {
+              router.refresh();
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "La recherche a échoué.";
+            setStatusMessage(message);
+            toast.error(message, { id: toastId });
+          } finally {
+            setIsSearching(false);
+          }
+        }}
+      >
+        {pending ? "Recherche en cours…" : "Relancer la recherche"}
+      </Button>
+      {statusMessage ? (
+        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+          {statusMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }
