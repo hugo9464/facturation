@@ -24,10 +24,19 @@ export async function saveJobOfferAgentFeedbackAction(formData: FormData) {
 }
 
 export async function retriggerJobOfferSearchAction() {
-  const user = await requireUser();
+  try {
+    const user = await requireUser();
+    const result = await runJobOfferScrape({ userIds: [user.id] });
 
-  await runJobOfferScrape({ userIds: [user.id] });
-  revalidatePath("/job-offers");
+    revalidatePath("/job-offers");
+    return { ok: true as const, ...result };
+  } catch (error) {
+    console.error("manual job offer search failed", error);
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "La recherche a échoué.",
+    };
+  }
 }
 
 export async function updateJobOfferStatusAction(formData: FormData) {

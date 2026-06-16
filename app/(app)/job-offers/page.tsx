@@ -2,11 +2,8 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseDb, toJobOffer, toJobOfferAgentFeedback } from "@/lib/supabase/db";
-import {
-  retriggerJobOfferSearchAction,
-  saveJobOfferAgentFeedbackAction,
-  updateJobOfferStatusAction,
-} from "@/actions/job-offers";
+import { saveJobOfferAgentFeedbackAction, updateJobOfferStatusAction } from "@/actions/job-offers";
+import { RetriggerSearchButton } from "./retrigger-search-button";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import {
@@ -103,9 +100,7 @@ export default async function JobOffersPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{offers.length} offre{offers.length > 1 ? "s" : ""}</Badge>
-          <form action={retriggerJobOfferSearchAction}>
-            <Button type="submit" size="sm" variant="outline">Relancer la recherche</Button>
-          </form>
+          <RetriggerSearchButton />
         </div>
       </div>
 
