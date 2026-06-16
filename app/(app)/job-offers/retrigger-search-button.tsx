@@ -6,11 +6,16 @@ import { toast } from "sonner";
 import { retriggerJobOfferSearchAction } from "@/actions/job-offers";
 import { Button } from "@/components/ui/button";
 
+type RetriggerSearchButtonProps = {
+  instruction?: string;
+  onSearchComplete?: () => void;
+};
+
 function plural(value: number, singular: string, pluralLabel: string = `${singular}s`) {
   return `${value} ${value > 1 ? pluralLabel : singular}`;
 }
 
-export function RetriggerSearchButton() {
+export function RetriggerSearchButton({ instruction, onSearchComplete }: RetriggerSearchButtonProps = {}) {
   const router = useRouter();
   const [refreshPending, startRefreshTransition] = useTransition();
   const [isSearching, setIsSearching] = useState(false);
@@ -31,7 +36,7 @@ export function RetriggerSearchButton() {
           const toastId = toast.loading("Recherche d'offres en cours…");
 
           try {
-            const result = await retriggerJobOfferSearchAction();
+            const result = await retriggerJobOfferSearchAction(instruction);
             if (!result.ok) {
               setStatusMessage(result.error);
               toast.error(result.error, { id: toastId });
@@ -51,6 +56,7 @@ export function RetriggerSearchButton() {
 
             setStatusMessage(summary);
             toast.success(summary, { id: toastId });
+            onSearchComplete?.();
             startRefreshTransition(() => {
               router.refresh();
             });

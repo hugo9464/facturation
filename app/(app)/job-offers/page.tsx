@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseDb, toJobOffer, toJobOfferAgentFeedback } from "@/lib/supabase/db";
-import { saveJobOfferAgentFeedbackAction, updateJobOfferStatusAction } from "@/actions/job-offers";
+import { updateJobOfferStatusAction } from "@/actions/job-offers";
+import { JobOfferAgentControls } from "./job-offer-agent-controls";
 import { RetriggerSearchButton } from "./retrigger-search-button";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
@@ -113,18 +114,7 @@ export default async function JobOffersPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form action={saveJobOfferAgentFeedbackAction} className="space-y-3">
-            <textarea
-              name="message"
-              required
-              minLength={3}
-              maxLength={1200}
-              rows={3}
-              placeholder="Ex: privilégie les missions remote, ignore les CDI, salaire minimum 60k€..."
-              className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
-            />
-            <Button type="submit" size="sm">Envoyer à l&apos;agent</Button>
-          </form>
+          <JobOfferAgentControls />
           {feedback.length > 0 ? (
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Derniers retours envoyés</p>

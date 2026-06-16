@@ -9,23 +9,32 @@ import { getSupabaseDb } from "@/lib/supabase/db";
 const jobOfferStatusSchema = z.enum(["NEW", "SAVED", "IGNORED", "APPLIED"]);
 const jobOfferFeedbackSchema = z.string().trim().min(3).max(1200);
 
-export async function saveJobOfferAgentFeedbackAction(formData: FormData) {
-  const user = await requireUser();
-  const message = jobOfferFeedbackSchema.parse(formData.get("message"));
+async function saveJobOfferAgentFeedbackMessage(userId: string, message: unknown) {
+  const parsedMessage = jobOfferFeedbackSchema.parse(message);
   const supabase = await getSupabaseDb();
 
   const { error } = await supabase.from("job_offer_agent_feedback").insert({
-    user_id: user.id,
-    message,
+    user_id: userId,
+    message: parsedMessage,
   });
 
   if (error) throw error;
-  revalidatePath("/job-offers");
+  return parsedMessage;
 }
 
-export async function retriggerJobOfferSearchAction() {
+export async function saveJobOfferAgentFeedbackAction(formData: FormData) {
+  const user = await requireUser();
+  await saveJobOfferAgentFeedbackMessage(user.id, formData.get("message"));
+  revalidatePath("/job-offers");
+  return { ok: true as const };
+}
+
+export async function retriggerJobOfferSearchAction(instruction?: string) {
   try {
     const user = await requireUser();
+    if (instruction?.trim()) {
+      await saveJobOfferAgentFeedbackMessage(user.id, instruction);
+    }
     const result = await runJobOfferScrape({ userIds: [user.id] });
 
     revalidatePath("/job-offers");
