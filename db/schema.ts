@@ -53,6 +53,10 @@ export const prospectionOfferReviewStatusEnum = {
   enumValues: ["PENDING", "IMPORTED", "ARCHIVED"] as const,
 };
 
+export const jobOfferStatusEnum = {
+  enumValues: ["NEW", "SAVED", "IGNORED", "APPLIED"] as const,
+};
+
 export type RateType = (typeof rateTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type QuoteStatus = (typeof quoteStatusEnum.enumValues)[number];
@@ -60,6 +64,7 @@ export type TodoStatus = (typeof todoStatusEnum.enumValues)[number];
 export type TodoDifficulty = (typeof todoDifficultyEnum.enumValues)[number];
 export type TodoImplementationJobStatus =
   (typeof todoImplementationJobStatusEnum.enumValues)[number];
+export type JobOfferStatus = (typeof jobOfferStatusEnum.enumValues)[number];
 export type PlafondType = (typeof plafondTypeEnum.enumValues)[number];
 export type ProspectionType = (typeof prospectionTypeEnum.enumValues)[number];
 export type ProspectionStatus =
@@ -373,3 +378,29 @@ export type NewProspectionApplicationQuestion = Omit<
   ProspectionApplicationQuestion,
   "id" | "createdAt" | "updatedAt"
 >;
+
+export type JobOffer = {
+  id: string;
+  userId: string;
+  source: string;
+  sourceId: string | null;
+  sourceUrl: string;
+  title: string;
+  company: string | null;
+  location: string | null;
+  remote: boolean;
+  contractType: string | null;
+  salary: string | null;
+  description: string | null;
+  tags: string[];
+  matchedKeywords: string[];
+  matchScore: number;
+  status: JobOfferStatus;
+  publishedAt: Date | null;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NewJobOffer = Omit<JobOffer, "id" | "createdAt" | "updatedAt">;

@@ -18,6 +18,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   GripVertical,
+  BriefcaseBusiness,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -54,6 +55,7 @@ const NAV = [
   { href: "/time", label: "Temps", icon: Clock },
   { href: "/todo", label: "Todo", icon: ListTodo },
   { href: "/prospection", label: "Prospection", icon: Search },
+  { href: "/job-offers", label: "Offres d'emploi", icon: BriefcaseBusiness },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/quotes", label: "Devis", icon: FileSignature },
   { href: "/invoices", label: "Factures", icon: FileText },

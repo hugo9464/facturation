@@ -18,6 +18,7 @@ import type {
   TodoProject,
   TodoImplementationJob,
   TodoTask,
+  JobOffer,
 } from "@/db/schema";
 
 type Raw = Record<string, unknown>;
@@ -324,6 +325,32 @@ export function toProspectionCvProfile(row: Raw): ProspectionCvProfile {
   return {
     userId: row.user_id as string,
     photoDataUrl: (row.photo_data_url as string | null) ?? null,
+    createdAt: requiredDate(row.created_at),
+    updatedAt: requiredDate(row.updated_at),
+  };
+}
+
+export function toJobOffer(row: Raw): JobOffer {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    source: row.source as string,
+    sourceId: (row.source_id as string | null) ?? null,
+    sourceUrl: row.source_url as string,
+    title: row.title as string,
+    company: (row.company as string | null) ?? null,
+    location: (row.location as string | null) ?? null,
+    remote: Boolean(row.remote),
+    contractType: (row.contract_type as string | null) ?? null,
+    salary: (row.salary as string | null) ?? null,
+    description: (row.description as string | null) ?? null,
+    tags: (row.tags as string[] | null) ?? [],
+    matchedKeywords: (row.matched_keywords as string[] | null) ?? [],
+    matchScore: Number(row.match_score),
+    status: row.status as JobOffer["status"],
+    publishedAt: date(row.published_at),
+    firstSeenAt: requiredDate(row.first_seen_at),
+    lastSeenAt: requiredDate(row.last_seen_at),
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };
