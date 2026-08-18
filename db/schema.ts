@@ -128,6 +128,7 @@ export type Invoice = {
   currency: string;
   legalMention: string;
   paymentTermsText: string;
+  poNumber: string | null;
   notes: string | null;
   pdfStoragePath: string | null;
   sentAt: Date | null;

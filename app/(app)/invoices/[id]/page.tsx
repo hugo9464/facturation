@@ -109,6 +109,11 @@ export default async function InvoiceDetailPage({
               {c?.name} · Émise le {formatDate(inv.issueDate)} · Échéance{" "}
               {formatDate(inv.dueDate)}
             </p>
+            {inv.poNumber && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Bon de commande : {inv.poNumber}
+              </p>
+            )}
             {inv.emailSentAt && (
               <p className="mt-1 text-sm text-emerald-600">
                 Envoyée par email le {formatDateTime(inv.emailSentAt)}

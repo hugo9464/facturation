@@ -46,6 +46,15 @@ export function DraftDetailsEditor({ invoice }: { invoice: Invoice }) {
         </div>
       </div>
       <div className="space-y-1.5">
+        <Label htmlFor="po_number">N° de bon de commande</Label>
+        <Input
+          id="po_number"
+          name="po_number"
+          defaultValue={invoice.poNumber ?? ""}
+          placeholder="Ex: PO-2026-05"
+        />
+      </div>
+      <div className="space-y-1.5">
         <Label htmlFor="notes">Notes (visible sur le PDF)</Label>
         <Textarea
           id="notes"

@@ -89,6 +89,7 @@ export function toInvoice(row: Raw): Invoice {
     currency: row.currency as string,
     legalMention: row.legal_mention as string,
     paymentTermsText: row.payment_terms_text as string,
+    poNumber: (row.po_number as string | null) ?? null,
     notes: (row.notes as string | null) ?? null,
     pdfStoragePath: (row.pdf_storage_path as string | null) ?? null,
     sentAt: date(row.sent_at),

@@ -186,6 +186,14 @@ export function InvoicePDF({
                 {formatDate(invoice.dueDate)}
               </Text>
             </View>
+            {invoice.poNumber && (
+              <View style={styles.invoiceMetaRow}>
+                <Text>
+                  <Text style={styles.invoiceMetaLabel}>Bon de commande </Text>
+                  {invoice.poNumber}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
