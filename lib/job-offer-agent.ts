@@ -1,3 +1,4 @@
+import { sendJobOfferDigestEmail, type JobOfferDigestEntry } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   parseJobOfferFeedbackPreferences,
@@ -39,6 +40,34 @@ function toInsertRow(userId: string, offer: RankedJobOffer) {
   };
 }
 
+function toDigestEntry(offer: RankedJobOffer): JobOfferDigestEntry {
+  return {
+    title: offer.title,
+    company: offer.company ?? null,
+    location: offer.location ?? null,
+    contractType: offer.contractType ?? null,
+    salary: offer.salary ?? null,
+    matchScore: offer.matchScore,
+    matchedKeywords: offer.matchedKeywords,
+    source: offer.source,
+    sourceUrl: offer.sourceUrl,
+  };
+}
+
+async function sendNewJobOfferDigest(entries: JobOfferDigestEntry[]) {
+  if (entries.length === 0) return;
+
+  const to = process.env.JOB_OFFER_DIGEST_EMAIL?.trim() || "hugo.faye@gmail.com";
+  const replyTo = process.env.GMAIL_USER?.trim() || to;
+  const result = await sendJobOfferDigestEmail({
+    to,
+    fromName: "Facturation",
+    replyTo,
+    entries,
+  });
+  if ("error" in result) throw new Error(result.error);
+}
+
 export async function runJobOfferScrape(options: JobOfferScrapeOptions = {}): Promise<JobOfferScrapeResult> {
   const admin = createAdminClient();
   const rawOffers = await scrapeRawJobOffers();
@@ -74,6 +103,9 @@ export async function runJobOfferScrape(options: JobOfferScrapeOptions = {}): Pr
 
   let inserted = 0;
   let refreshed = 0;
+  const pendingRows: ReturnType<typeof toInsertRow>[] = [];
+  const digestEntries: JobOfferDigestEntry[] = [];
+  const digestUrls = new Set<string>();
   const now = new Date().toISOString();
 
   for (const profile of profiles ?? []) {
@@ -95,15 +127,17 @@ export async function runJobOfferScrape(options: JobOfferScrapeOptions = {}): Pr
     const existingByUrl = new Map(
       (existingRows ?? []).map((row) => [row.source_url as string, row.id as string]),
     );
-    const newRows = offers
-      .filter((offer) => !existingByUrl.has(offer.sourceUrl))
-      .map((offer) => toInsertRow(userId, offer));
+    const newOffers = offers.filter((offer) => !existingByUrl.has(offer.sourceUrl));
+    const newRows = newOffers.map((offer) => toInsertRow(userId, offer));
     const existingIds = Array.from(existingByUrl.values());
 
     if (newRows.length > 0) {
-      const { error: insertError } = await admin.from("job_offer").insert(newRows);
-      if (insertError) throw insertError;
-      inserted += newRows.length;
+      pendingRows.push(...newRows);
+      for (const offer of newOffers) {
+        if (digestUrls.has(offer.sourceUrl)) continue;
+        digestUrls.add(offer.sourceUrl);
+        digestEntries.push(toDigestEntry(offer));
+      }
     }
 
     if (existingIds.length > 0) {
@@ -114,6 +148,14 @@ export async function runJobOfferScrape(options: JobOfferScrapeOptions = {}): Pr
       if (updateError) throw updateError;
       refreshed += existingIds.length;
     }
+  }
+
+  await sendNewJobOfferDigest(digestEntries);
+
+  if (pendingRows.length > 0) {
+    const { error: insertError } = await admin.from("job_offer").insert(pendingRows);
+    if (insertError) throw insertError;
+    inserted = pendingRows.length;
   }
 
   return {
