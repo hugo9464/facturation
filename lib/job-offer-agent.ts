@@ -58,7 +58,10 @@ async function sendNewJobOfferDigest(entries: JobOfferDigestEntry[]) {
   if (entries.length === 0) return;
 
   const to = process.env.JOB_OFFER_DIGEST_EMAIL?.trim() || "hugo.faye@gmail.com";
-  const replyTo = process.env.GMAIL_USER?.trim() || to;
+  const replyTo = process.env.SMTP_FROM?.trim() ||
+    process.env.SMTP_USER?.trim() ||
+    process.env.GMAIL_USER?.trim() ||
+    to;
   const result = await sendJobOfferDigestEmail({
     to,
     fromName: "Facturation",

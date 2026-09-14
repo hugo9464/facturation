@@ -43,7 +43,31 @@ type SendJobOfferDigestEmailInput = {
   entries: JobOfferDigestEntry[];
 };
 
-function getGmailConfig() {
+function getEmailConfig() {
+  const smtpHost = process.env.SMTP_HOST?.trim();
+  const smtpUser = process.env.SMTP_USER?.trim();
+  const smtpPassword = process.env.SMTP_PASSWORD?.trim();
+  const smtpFrom = process.env.SMTP_FROM?.trim() || smtpUser;
+
+  if (smtpHost && smtpFrom) {
+    const port = Number(process.env.SMTP_PORT ?? "587");
+    const secure = process.env.SMTP_SECURE === "true" || port === 465;
+    return {
+      from: smtpFrom,
+      transport: {
+        host: smtpHost,
+        port,
+        secure,
+        auth: smtpUser && smtpPassword
+          ? {
+              user: smtpUser,
+              pass: smtpPassword,
+            }
+          : undefined,
+      },
+    };
+  }
+
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
 
@@ -51,11 +75,20 @@ function getGmailConfig() {
     return null;
   }
 
-  return { user, pass };
+  return {
+    from: user,
+    transport: {
+      service: "gmail",
+      auth: {
+        user,
+        pass,
+      },
+    },
+  };
 }
 
 export function isGmailEmailConfigured() {
-  return Boolean(getGmailConfig());
+  return Boolean(getEmailConfig());
 }
 
 export async function sendInvoiceEmail({
@@ -67,24 +100,18 @@ export async function sendInvoiceEmail({
   body,
   pdf,
 }: SendInvoiceEmailInput) {
-  const config = getGmailConfig();
+  const config = getEmailConfig();
   if (!config) {
     return {
       error:
-        "Envoi email non configuré. Ajoute GMAIL_USER et GMAIL_APP_PASSWORD.",
+        "Envoi email non configuré. Ajoute SMTP_HOST/SMTP_USER/SMTP_PASSWORD/SMTP_FROM ou GMAIL_USER/GMAIL_APP_PASSWORD.",
     };
   }
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-  });
+  const transporter = nodemailer.createTransport(config.transport);
 
   await transporter.sendMail({
-    from: `"${fromName}" <${config.user}>`,
+    from: `"${fromName}" <${config.from}>`,
     to,
     replyTo,
     subject,
@@ -107,22 +134,16 @@ export async function sendProspectionDigestEmail({
   replyTo,
   entries,
 }: SendProspectionDigestEmailInput) {
-  const config = getGmailConfig();
+  const config = getEmailConfig();
   if (!config) {
     return {
       error:
-        "Envoi email non configuré. Ajoute GMAIL_USER et GMAIL_APP_PASSWORD.",
+        "Envoi email non configuré. Ajoute SMTP_HOST/SMTP_USER/SMTP_PASSWORD/SMTP_FROM ou GMAIL_USER/GMAIL_APP_PASSWORD.",
     };
   }
   if (entries.length === 0) return { success: true };
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-  });
+  const transporter = nodemailer.createTransport(config.transport);
   const subject =
     entries.length === 1
       ? "Nouvelle mission Collective.work"
@@ -141,7 +162,7 @@ export async function sendProspectionDigestEmail({
   ].filter((line): line is string => line !== null);
 
   await transporter.sendMail({
-    from: `"${fromName}" <${config.user}>`,
+    from: `"${fromName}" <${config.from}>`,
     to,
     replyTo,
     subject,
@@ -157,22 +178,16 @@ export async function sendJobOfferDigestEmail({
   replyTo,
   entries,
 }: SendJobOfferDigestEmailInput) {
-  const config = getGmailConfig();
+  const config = getEmailConfig();
   if (!config) {
     return {
       error:
-        "Envoi email non configuré. Ajoute GMAIL_USER et GMAIL_APP_PASSWORD.",
+        "Envoi email non configuré. Ajoute SMTP_HOST/SMTP_USER/SMTP_PASSWORD/SMTP_FROM ou GMAIL_USER/GMAIL_APP_PASSWORD.",
     };
   }
   if (entries.length === 0) return { success: true };
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-  });
+  const transporter = nodemailer.createTransport(config.transport);
   const subject =
     entries.length === 1
       ? "Nouvelle opportunité authentifiée"
@@ -200,7 +215,7 @@ export async function sendJobOfferDigestEmail({
   ].filter((line): line is string => line !== null);
 
   await transporter.sendMail({
-    from: `"${fromName}" <${config.user}>`,
+    from: `"${fromName}" <${config.from}>`,
     to,
     replyTo,
     subject,
