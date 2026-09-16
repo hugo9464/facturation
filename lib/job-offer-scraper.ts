@@ -24,6 +24,7 @@ export type JobOfferFeedbackPreferences = {
 };
 
 const SEARCH_TERMS = [
+  "barista",
   "product builder",
   "product builder france",
   "no-code",
@@ -48,6 +49,10 @@ const SEARCH_TERMS = [
 ];
 
 const MATCH_KEYWORDS = [
+  "barista",
+  "bubble tea",
+  "coffee",
+  "café",
   "product builder",
   "product owner",
   "product manager",
@@ -131,6 +136,10 @@ const FRANCE_KEYWORDS = [
 const MAX_DESCRIPTION_LENGTH = 1800;
 const CHOISIR_SERVICE_PUBLIC_BASE_URL = "https://choisirleservicepublic.gouv.fr/nos-offres/filtres/localisation/284-287/domaine/3522/";
 const CHOISIR_SERVICE_PUBLIC_MAX_PAGES = 3;
+const FRANCE_TRAVAIL_BARISTA_URLS = [
+  "https://candidat.francetravail.fr/offres/recherche?motsCles=barista&lieux=75D,94D&offresPartenaires=true&range=0-19&tri=0",
+  "https://candidat.francetravail.fr/offres/recherche?motsCles=barista&lieux=75D,94D&offresPartenaires=true&range=20-39&tri=0",
+];
 
 function decodeHtmlEntities(value: string): string {
   return value
@@ -372,6 +381,77 @@ function parseFrenchListingDate(value: string | null): string | null {
   return new Date(Date.UTC(year, month, day)).toISOString();
 }
 
+function normalizeFranceTravailUrl(href: string): string | null {
+  try {
+    return new URL(decodeHtmlEntities(href), "https://candidat.francetravail.fr").toString();
+  } catch {
+    return null;
+  }
+}
+
+function parseFranceTravailSubtext(value: string): { company: string | null; location: string | null } {
+  const text = stripHtml(value).replace(/\s+/g, " ").trim();
+  const locationMatch = text.match(/(?:^|[-–—]\s*)(\d{2}\s*-\s*[^-–—]+(?:\s+\d{1,2}(?:e|er)?(?:\s+Arrondissement)?)?)/i);
+  const location = locationMatch ? locationMatch[1].trim() : null;
+  const company = locationMatch
+    ? text.slice(0, locationMatch.index).replace(/[-–—\s]+$/g, "").trim() || null
+    : null;
+  return { company, location };
+}
+
+export function parseFranceTravailOffers(html: string): RawJobOffer[] {
+  const offers: RawJobOffer[] = [];
+  const cardPattern = /<li\s+[^>]*data-id-offre="([^"]+)"[^>]*class="[^"]*result[^"]*"[^>]*>[\s\S]*?(?=<li\s+[^>]*data-id-offre=|<\/ul>)/gi;
+
+  for (const match of Array.from(html.matchAll(cardPattern))) {
+    const sourceId = decodeHtmlEntities(match[1]);
+    const card = match[0];
+    const linkMatch = card.match(/<a\s+[^>]*href="([^"]*\/offres\/recherche\/detail\/[^"]+)"[^>]*>/i);
+    const title = extractFirst(card, /<span\s+class="media-heading-title">([\s\S]*?)<\/span>/i);
+    if (!linkMatch || !title) continue;
+
+    const sourceUrl = normalizeFranceTravailUrl(linkMatch[1]);
+    if (!sourceUrl) continue;
+
+    const subtext = extractFirst(card, /<p\s+[^>]*class="subtext"[^>]*>([\s\S]*?)<\/p>/i);
+    const { company, location } = parseFranceTravailSubtext(subtext ?? "");
+    if (!location || !/(^|\D)(75|94)\s*-/i.test(location)) continue;
+
+    const description = extractFirst(card, /<p\s+class="description">([\s\S]*?)<\/p>/i);
+    const contractType = extractFirst(card, /<p\s+class="contrat(?:\s+visible-xs)?">([\s\S]*?)<\/p>/i);
+    const dateText = extractFirst(card, /<p\s+class="date">([\s\S]*?)<\/p>/i);
+
+    offers.push({
+      source: "France Travail",
+      sourceId,
+      sourceUrl,
+      title,
+      company,
+      location,
+      remote: false,
+      contractType,
+      salary: null,
+      description: [description, contractType, dateText].filter(Boolean).join(" — ") || null,
+      tags: ["barista", "France Travail"],
+      publishedAt: null,
+    });
+  }
+
+  return offers;
+}
+
+async function scrapeFranceTravailBarista(): Promise<RawJobOffer[]> {
+  const results = await Promise.allSettled(
+    FRANCE_TRAVAIL_BARISTA_URLS.map(async (url) => parseFranceTravailOffers(await fetchText(url))),
+  );
+  const byUrl = new Map<string, RawJobOffer>();
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    for (const offer of result.value) byUrl.set(offer.sourceUrl, offer);
+  }
+  return Array.from(byUrl.values());
+}
+
 export function parseChoisirServicePublicOffers(html: string): RawJobOffer[] {
   const offers: RawJobOffer[] = [];
   const cardPattern = /<div class="fr-card fr-card--horizontal fr-card--horizontal-tier fr-card--offer">[\s\S]*?(?=<div class="fr-card fr-card--horizontal fr-card--horizontal-tier fr-card--offer">|<nav class="fr-pagination|<\/ul>\s*<\/div>\s*<\/div>\s*<\/div>)/g;
@@ -528,7 +608,13 @@ async function scrapeRemoteOk(): Promise<RawJobOffer[]> {
 }
 
 export async function scrapeRawJobOffers(): Promise<RawJobOffer[]> {
-  const results = await Promise.allSettled([scrapeRemotive(), scrapeArbeitnow(), scrapeRemoteOk(), scrapeChoisirServicePublic()]);
+  const results = await Promise.allSettled([
+    scrapeFranceTravailBarista(),
+    scrapeRemotive(),
+    scrapeArbeitnow(),
+    scrapeRemoteOk(),
+    scrapeChoisirServicePublic(),
+  ]);
   return results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : [],
   );
