@@ -72,7 +72,7 @@ function buildOfferInsights(entry: JobOfferDigestEntry) {
     ...entry.matchedKeywords,
   ].filter(Boolean).join(" ").toLowerCase();
 
-  const hoursMatch = haystack.match(/(?:^|\D)(\d{1,2})\s*h(?:eures?)?(?:\s*(?:\/|par)\s*semaine)?/i);
+  const hoursMatch = haystack.match(/(?:^|\D)(\d{1,2})\s*h(?!\s*\/?\s*f)(?:eures?)?(?:\s*(?:\/|par)\s*semaine)?/i);
   const weeklyHours = hoursMatch ? `${Number(hoursMatch[1])}h/semaine` : "Horaires non précisés";
   const morning = /\b(matin|matinale?|ouverture|petit[-\s]?déjeuner|breakfast)\b/i.test(haystack);
   const weekend = /\b(week[-\s]?end|samedi|dimanche|sam\.?|dim\.?)\b/i.test(haystack);
@@ -80,23 +80,26 @@ function buildOfferInsights(entry: JobOfferDigestEntry) {
 
   return {
     weeklyHours,
-    morningLabel: morning ? "Travail le matin" : "Matin non précisé",
-    weekendLabel: weekend ? "Week-end probable" : "Week-end non précisé",
-    eveningLabel: evening ? "Soir/fermeture possible" : "Soir non précisé",
+    morningLabel: morning ? "Matin" : "Matin non précisé",
+    weekendLabel: weekend ? "Week-end" : "Week-end non précisé",
+    eveningLabel: evening ? "Soir/fermeture" : "Soir non précisé",
   };
 }
 
-function buildOfferSummary(entry: JobOfferDigestEntry) {
+function compactScheduleFacts(entry: JobOfferDigestEntry) {
   const insights = buildOfferInsights(entry);
+  return [insights.weeklyHours, insights.morningLabel, insights.weekendLabel, insights.eveningLabel]
+    .filter((item) => !/non précisé|horaires non précisés/i.test(item));
+}
+
+function buildOfferSummary(entry: JobOfferDigestEntry) {
   const fragments = [
     entry.company ? `chez ${entry.company}` : null,
     entry.location ? `à ${entry.location}` : null,
     entry.contractType ? `en ${entry.contractType}` : null,
   ].filter(Boolean).join(" ");
   const details = compactText(entry.description, 260);
-  const schedule = [insights.weeklyHours, insights.morningLabel, insights.weekendLabel]
-    .filter((item) => !/non précisé/i.test(item))
-    .join(" · ");
+  const schedule = compactScheduleFacts(entry).slice(0, 3).join(" · ");
   return compactText(
     [
       `${entry.title}${fragments ? ` — ${fragments}` : ""}.`,
@@ -117,7 +120,7 @@ export function buildJobOfferDigestEmailContent(entries: JobOfferDigestEntry[]) 
     `Sélection du ${today}`,
     "",
     ...entries.flatMap((entry, index) => {
-      const insights = buildOfferInsights(entry);
+      const scheduleFacts = compactScheduleFacts(entry);
       return [
         `${index + 1}. ${entry.title}`,
         entry.company ? `Entreprise: ${entry.company}` : null,
@@ -125,7 +128,7 @@ export function buildJobOfferDigestEmailContent(entries: JobOfferDigestEntry[]) 
         entry.contractType ? `Contrat: ${entry.contractType}` : null,
         entry.salary ? `Rémunération: ${entry.salary}` : null,
         `Résumé: ${buildOfferSummary(entry)}`,
-        `Horaires: ${insights.weeklyHours}; ${insights.morningLabel}; ${insights.weekendLabel}; ${insights.eveningLabel}`,
+        scheduleFacts.length > 0 ? `Horaires: ${scheduleFacts.join(" · ")}` : "Horaires: non précisés",
         `Source: ${entry.source}`,
         `Lien: ${entry.sourceUrl}`,
         "",
@@ -135,39 +138,35 @@ export function buildJobOfferDigestEmailContent(entries: JobOfferDigestEntry[]) 
   ].filter((line): line is string => line !== null);
 
   const cards = entries.map((entry, index) => {
-    const insights = buildOfferInsights(entry);
     const summary = buildOfferSummary(entry);
+    const scheduleFacts = compactScheduleFacts(entry);
     const pills = [
       entry.contractType,
       entry.location,
       entry.salary,
-      insights.weeklyHours,
-      insights.morningLabel,
-      insights.weekendLabel,
     ].filter(Boolean);
+    const scheduleLine = scheduleFacts.length > 0 ? scheduleFacts.join(" · ") : "Horaires non précisés";
     return `
-      <article style="background:#ffffff;border:1px solid #e5e7eb;border-radius:22px;padding:24px;margin:0 0 18px 0;box-shadow:0 14px 35px rgba(15,23,42,.08);">
+      <article style="background:#ffffff;border:1px solid #e5e7eb;border-radius:18px;padding:18px;margin:0 0 14px 0;box-shadow:0 8px 22px rgba(15,23,42,.06);">
         <div style="display:flex;gap:12px;align-items:flex-start;justify-content:space-between;">
           <div>
-            <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:8px;">Offre #${index + 1} · ${escapeHtml(entry.source)}</div>
-            <h2 style="font-family:Inter,Arial,sans-serif;font-size:22px;line-height:1.25;color:#0f172a;margin:0 0 8px 0;">${escapeHtml(entry.title)}</h2>
-            <p style="font-size:15px;color:#475569;margin:0;">${escapeHtml([entry.company, entry.location].filter(Boolean).join(" · ") || "Entreprise / lieu à vérifier")}</p>
+            <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:6px;">#${index + 1} · ${escapeHtml(entry.source)}</div>
+            <h2 style="font-family:Inter,Arial,sans-serif;font-size:18px;line-height:1.25;color:#0f172a;margin:0 0 6px 0;">${escapeHtml(entry.title)}</h2>
+            <p style="font-size:13px;color:#475569;margin:0;">${escapeHtml([entry.company, entry.location].filter(Boolean).join(" · ") || "Entreprise / lieu à vérifier")}</p>
           </div>
-          <div style="background:#eef2ff;color:#4338ca;border-radius:999px;padding:8px 12px;font-weight:800;font-size:13px;white-space:nowrap;">Score ${entry.matchScore}</div>
+          <div style="background:#eef2ff;color:#4338ca;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px;white-space:nowrap;">${entry.matchScore}</div>
         </div>
-        <div style="margin:18px 0 16px 0;">
-          ${pills.map((pill) => `<span style="display:inline-block;background:#f8fafc;border:1px solid #e2e8f0;color:#334155;border-radius:999px;padding:7px 10px;font-size:13px;margin:0 6px 8px 0;">${escapeHtml(String(pill))}</span>`).join("")}
+        <div style="margin:12px 0 10px 0;">
+          ${pills.map((pill) => `<span style="display:inline-block;background:#f8fafc;border:1px solid #e2e8f0;color:#334155;border-radius:999px;padding:5px 8px;font-size:12px;margin:0 4px 6px 0;">${escapeHtml(String(pill))}</span>`).join("")}
         </div>
-        <div style="background:#f8fafc;border-radius:16px;padding:16px;margin:0 0 18px 0;border:1px solid #e2e8f0;">
-          <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:6px;">Résumé</div>
-          <p style="font-size:15px;line-height:1.55;color:#334155;margin:0;">${escapeHtml(summary)}</p>
+        <div style="background:#f8fafc;border-radius:14px;padding:12px;margin:0 0 12px 0;border:1px solid #e2e8f0;">
+          <div style="font-size:12px;font-weight:800;color:#0f172a;margin-bottom:4px;">Résumé</div>
+          <p style="font-size:13px;line-height:1.45;color:#334155;margin:0;">${escapeHtml(summary)}</p>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:20px;">
-          <div style="background:#ecfeff;border:1px solid #cffafe;border-radius:14px;padding:12px;"><strong style="display:block;color:#155e75;font-size:12px;">Volume</strong><span style="color:#0f172a;font-size:14px;">${escapeHtml(insights.weeklyHours)}</span></div>
-          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:12px;"><strong style="display:block;color:#9a3412;font-size:12px;">Matin</strong><span style="color:#0f172a;font-size:14px;">${escapeHtml(insights.morningLabel)}</span></div>
-          <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-radius:14px;padding:12px;"><strong style="display:block;color:#9d174d;font-size:12px;">Week-end</strong><span style="color:#0f172a;font-size:14px;">${escapeHtml(insights.weekendLabel)}</span></div>
+        <div style="font-size:12px;color:#64748b;margin:0 0 12px 0;">
+          ${escapeHtml(scheduleLine)}
         </div>
-        <a href="${escapeHtml(entry.sourceUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:14px;padding:13px 18px;font-weight:800;font-size:15px;">Voir l'offre</a>
+        <a href="${escapeHtml(entry.sourceUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:12px;padding:10px 14px;font-weight:800;font-size:13px;">Voir l'offre</a>
       </article>`;
   }).join("");
 
