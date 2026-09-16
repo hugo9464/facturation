@@ -38,6 +38,10 @@ const SEARCH_TERMS = [
   "automation specialist france",
   "technical builder",
   "product manager france",
+  "product owner",
+  "chef de projet numérique",
+  "chef de projet si",
+  "qa engineer",
   "chef de projet ia",
   "consultant no-code",
   "consultant automatisation",
@@ -45,10 +49,24 @@ const SEARCH_TERMS = [
 
 const MATCH_KEYWORDS = [
   "product builder",
+  "product owner",
+  "product manager",
+  "chef de projet",
   "no-code",
   "nocode",
   "low-code",
   "lowcode",
+  "qualité",
+  "quality",
+  "qa",
+  "recette",
+  "test automation",
+  "automatisation de tests",
+  "système d'information",
+  "systemes d'information",
+  "systèmes d'information",
+  "si",
+  "data",
   "ai",
   "ia",
   "llm",
@@ -88,6 +106,10 @@ const FRANCE_KEYWORDS = [
   "francaise",
   "française",
   "paris",
+  "créteil",
+  "creteil",
+  "val-de-marne",
+  "val de marne",
   "lyon",
   "marseille",
   "toulouse",
@@ -107,6 +129,43 @@ const FRANCE_KEYWORDS = [
 ];
 
 const MAX_DESCRIPTION_LENGTH = 1800;
+const CHOISIR_SERVICE_PUBLIC_BASE_URL = "https://choisirleservicepublic.gouv.fr/nos-offres/filtres/localisation/284-287/domaine/3522/";
+const CHOISIR_SERVICE_PUBLIC_MAX_PAGES = 3;
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([a-f0-9]+);/gi, (_match, code) => String.fromCharCode(Number.parseInt(code, 16)));
+}
+
+function stripHtml(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+function extractFirst(value: string, pattern: RegExp): string | null {
+  const match = value.match(pattern);
+  return match ? stripHtml(match[1]) : null;
+}
+
+function removeScreenReaderLabel(value: string | null): string | null {
+  if (!value) return null;
+  const cleaned = value.replace(/^(?:Localisation|Fonction publique|Employeur)\s*:\s*/i, "").trim();
+  return cleaned || null;
+}
 
 function compactText(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -263,10 +322,110 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
+async function fetchText(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": "FacturationJobOfferAgent/1.0" },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function parseDate(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function parseFrenchListingDate(value: string | null): string | null {
+  if (!value) return null;
+  const months: Record<string, number> = {
+    janvier: 0,
+    février: 1,
+    fevrier: 1,
+    mars: 2,
+    avril: 3,
+    mai: 4,
+    juin: 5,
+    juillet: 6,
+    août: 7,
+    aout: 7,
+    septembre: 8,
+    octobre: 9,
+    novembre: 10,
+    décembre: 11,
+    decembre: 11,
+  };
+  const match = value.toLowerCase().match(/(\d{1,2})\s+([a-zéû]+)\s+(\d{4})/i);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = months[match[2]];
+  const year = Number(match[3]);
+  if (month == null || !Number.isFinite(day) || !Number.isFinite(year)) return null;
+  return new Date(Date.UTC(year, month, day)).toISOString();
+}
+
+export function parseChoisirServicePublicOffers(html: string): RawJobOffer[] {
+  const offers: RawJobOffer[] = [];
+  const cardPattern = /<div class="fr-card fr-card--horizontal fr-card--horizontal-tier fr-card--offer">[\s\S]*?(?=<div class="fr-card fr-card--horizontal fr-card--horizontal-tier fr-card--offer">|<nav class="fr-pagination|<\/ul>\s*<\/div>\s*<\/div>\s*<\/div>)/g;
+  const cards = html.match(cardPattern) ?? [];
+
+  for (const card of cards) {
+    const linkMatch = card.match(/<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+    if (!linkMatch) continue;
+    const sourceUrl = normalizeUrl(decodeHtmlEntities(linkMatch[1]));
+    const title = stripHtml(linkMatch[2]);
+    if (!sourceUrl || !title) continue;
+
+    const location = removeScreenReaderLabel(extractFirst(card, /<li class="fr-icon-map-pin-2-line fr-icon--sm">([\s\S]*?)<\/li>/i));
+    if (!location || !/(\(75\)|\(94\)|paris|val[- ]de[- ]marne|créteil|creteil)/i.test(location)) continue;
+
+    const contractType = removeScreenReaderLabel(extractFirst(card, /<li class="fr-icon-file-line fr-icon--sm">([\s\S]*?)<\/li>/i));
+    const company = removeScreenReaderLabel(extractFirst(card, /<li class="fr-icon-user-line\s+fr-icon--sm">([\s\S]*?)<\/li>/i));
+    const publishedText = extractFirst(card, /<li class="fr-icon-calendar-line\s+fr-icon--sm">([\s\S]*?)<\/li>/i);
+    const tagMatches = Array.from(card.matchAll(/<p\s+class="fr-tag\s*"\s*>[\s\S]*?([^<>]+)[\s\S]*?<\/p>/gi))
+      .map((match) => stripHtml(match[0]));
+    const tags = unique([...tagMatches, "Choisir le service public"]);
+    const sourceId = sourceUrl.match(/reference-([^/]+)\/?$/i)?.[1] ?? null;
+
+    offers.push({
+      source: "Choisir le service public",
+      sourceId,
+      sourceUrl,
+      title,
+      company,
+      location,
+      remote: false,
+      contractType,
+      salary: null,
+      description: [title, company, contractType, location, ...tags].filter(Boolean).join(" — "),
+      tags,
+      publishedAt: parseFrenchListingDate(publishedText),
+    });
+  }
+
+  return offers;
+}
+
+async function scrapeChoisirServicePublic(): Promise<RawJobOffer[]> {
+  const maxPages = Math.max(1, Number(process.env.CHOISIR_SERVICE_PUBLIC_MAX_PAGES ?? CHOISIR_SERVICE_PUBLIC_MAX_PAGES));
+  const pageUrls = Array.from({ length: maxPages }, (_unused, index) =>
+    index === 0 ? CHOISIR_SERVICE_PUBLIC_BASE_URL : `${CHOISIR_SERVICE_PUBLIC_BASE_URL}page/${index + 1}/`,
+  );
+  const results = await Promise.allSettled(pageUrls.map(async (url) => parseChoisirServicePublicOffers(await fetchText(url))));
+  const byUrl = new Map<string, RawJobOffer>();
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    for (const offer of result.value) byUrl.set(offer.sourceUrl, offer);
+  }
+  return Array.from(byUrl.values());
 }
 
 async function scrapeRemotive(): Promise<RawJobOffer[]> {
@@ -369,7 +528,7 @@ async function scrapeRemoteOk(): Promise<RawJobOffer[]> {
 }
 
 export async function scrapeRawJobOffers(): Promise<RawJobOffer[]> {
-  const results = await Promise.allSettled([scrapeRemotive(), scrapeArbeitnow(), scrapeRemoteOk()]);
+  const results = await Promise.allSettled([scrapeRemotive(), scrapeArbeitnow(), scrapeRemoteOk(), scrapeChoisirServicePublic()]);
   return results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : [],
   );
