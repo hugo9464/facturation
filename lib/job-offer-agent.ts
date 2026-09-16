@@ -51,6 +51,8 @@ function toDigestEntry(offer: RankedJobOffer): JobOfferDigestEntry {
     matchedKeywords: offer.matchedKeywords,
     source: offer.source,
     sourceUrl: offer.sourceUrl,
+    description: offer.description ?? null,
+    tags: offer.tags ?? [],
   };
 }
 
