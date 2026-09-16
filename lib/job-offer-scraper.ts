@@ -104,6 +104,70 @@ const NEGATIVE_KEYWORDS = [
   "data scientist phd",
 ];
 
+const BARISTA_CONTEXT_KEYWORDS = [
+  "barista",
+  "coffee",
+  "coffee shop",
+  "café",
+  "cafe",
+  "espresso",
+  "torréfacteur",
+  "torrefacteur",
+  "bubble tea",
+];
+
+const INDEPENDENT_COFFEE_SHOP_KEYWORDS = [
+  "coffee shop indépendant",
+  "coffee shop independant",
+  "café indépendant",
+  "cafe independant",
+  "café de spécialité",
+  "cafe de specialite",
+  "specialty coffee",
+  "speciality coffee",
+  "torréfacteur indépendant",
+  "torrefacteur independant",
+  "artisan torréfacteur",
+  "artisan torrefacteur",
+  "brûlerie",
+  "brulerie",
+];
+
+const EXCLUDED_BARISTA_CHAIN_KEYWORDS = [
+  "starbucks",
+  "columbus café",
+  "columbus cafe",
+  "colombus café",
+  "colombus cafe",
+  "costa coffee",
+  "pret a manger",
+  "pret à manger",
+  "mccafé",
+  "mccafe",
+  "mc café",
+  "mc cafe",
+  "mcdonald",
+  "mc donald",
+  "brioche dorée",
+  "brioche doree",
+  "la croissanterie",
+  "paul",
+  "cojean",
+  "exki",
+  "caffè nero",
+  "caffe nero",
+  "gong cha",
+  "chatime",
+  "yi fang",
+  "yifang",
+  "xing fu tang",
+  "the alley",
+  "bubbleology",
+  "tiger sugar",
+  "möge tee",
+  "moge tee",
+];
+
 const FRANCE_KEYWORDS = [
   "france",
   "french",
@@ -268,24 +332,41 @@ function rankOffer(offer: RawJobOffer): RankedJobOffer | null {
   );
   if (!isFranceOffer) return null;
 
+  const isBaristaCoffeeOffer = BARISTA_CONTEXT_KEYWORDS.some((keyword) =>
+    keywordMatches(haystack, keyword),
+  );
+  if (
+    isBaristaCoffeeOffer &&
+    EXCLUDED_BARISTA_CHAIN_KEYWORDS.some((keyword) => keywordMatches(haystack, keyword))
+  ) {
+    return null;
+  }
+
   const matchedKeywords = MATCH_KEYWORDS.filter((keyword) =>
     keywordMatches(haystack, keyword),
   );
   const negativeMatches = NEGATIVE_KEYWORDS.filter((keyword) =>
     keywordMatches(haystack, keyword),
   );
+  const independentCoffeeShopBoost = isBaristaCoffeeOffer &&
+      INDEPENDENT_COFFEE_SHOP_KEYWORDS.some((keyword) => keywordMatches(haystack, keyword))
+    ? 14
+    : 0;
 
   const title = offer.title.toLowerCase();
   const titleBoost = MATCH_KEYWORDS.filter((keyword) =>
     keywordMatches(title, keyword),
   ).length;
   const remoteBoost = offer.remote !== false ? 4 : 0;
-  const score = matchedKeywords.length * 8 + titleBoost * 10 + remoteBoost - negativeMatches.length * 12;
+  const score = matchedKeywords.length * 8 + titleBoost * 10 + remoteBoost + independentCoffeeShopBoost - negativeMatches.length * 12;
 
   if (score < 12) return null;
   return {
     ...offer,
-    tags: unique(offer.tags ?? []),
+    tags: unique([
+      ...(offer.tags ?? []),
+      ...(independentCoffeeShopBoost > 0 ? ["coffee shop indépendant"] : []),
+    ]),
     matchedKeywords: unique(matchedKeywords),
     matchScore: score,
   };
